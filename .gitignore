@@ -1,0 +1,9 @@
+node_modules/
+dist/
+cdk.out/
+.env
+.DS_Store
+*.log
+cf-private-key.pem
+cf-public-key.pem
+*.pem

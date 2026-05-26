@@ -1,0 +1,21 @@
+{
+  "name": "ai-video-platform-infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cdk": "cdk",
+    "deploy": "cdk deploy",
+    "diff": "cdk diff",
+    "synth": "cdk synth",
+    "test": "node --test ../tests/*.test.js",
+    "lint": "node --check bin/app.js"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.143.0",
+    "constructs": "^10.3.0"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.143.0"
+  }
+}
