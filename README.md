@@ -1,100 +1,96 @@
-# AI Video Platform MVP
+# Serverless AI Video Platform
 
-Serverless video upload and HLS playback MVP built with JavaScript.
+JavaScript-only AWS CDK project for an event-driven AI video platform.
 
-## Stack
+## What Is Implemented
 
-- Frontend: React + Vite + hls.js
-- Backend: Node.js Lambda functions
-- Infrastructure: AWS CDK JavaScript
-- AWS: S3, API Gateway HTTP API, Lambda, DynamoDB, EventBridge, MediaConvert, CloudFront
+- React + Vite frontend with upload, dashboard, watch view, HLS.js playback, and Cognito/Amplify wiring
+- Cognito auth with Google OAuth support
+- HTTP API for upload URLs, metadata, stream info, status, video listing, and async deletion
+- WebSocket API for video-ready/video-failed notifications
+- S3 storage for raw videos, HLS output, thumbnails, and subtitles
+- DynamoDB single-table data model with user, video, event, idempotency, and circuit-breaker records
+- EventBridge bus and typed event utilities
+- AI Supervisor Agent using Bedrock Nova Lite, DynamoDB idempotency, and DynamoDB-backed circuit breaker
+- Step Functions Express processing pipeline
+- MediaConvert path using `waitForTaskToken`
+- Custom FFmpeg ECS Fargate worker path using SQS FIFO and Step Functions task callbacks
+- Subtitle, moderation, thumbnail, frame extraction, and clip-generation handlers
+- Async deletion pipeline that cleans S3 assets, invalidates CloudFront, and deletes DynamoDB records
+- CloudFront delivery with OAC and signed URL utility
+- KMS-backed sensitive storage, WAF, SNS alerts, and CloudWatch alarms scaffold
+- GitHub Actions, preflight checks, post-deploy env generation, unit tests, and integration test scaffold
 
-## What This MVP Does
-
-1. React asks the API for a presigned S3 upload URL.
-2. Browser uploads the video directly to the raw S3 bucket.
-3. S3 upload event starts the AI Supervisor Agent Lambda.
-4. Supervisor creates a processing plan and publishes `AI_PLAN_CREATED`.
-5. EventBridge routes the plan to the MediaConvert starter Lambda.
-6. MediaConvert writes HLS output to the processed S3 bucket.
-7. EventBridge receives MediaConvert completion events and updates DynamoDB.
-8. React fetches video status, displays the supervisor plan, and plays the CloudFront HLS URL with hls.js.
-
-## Project Structure
+## Structure
 
 ```text
-ai-video-platform/
-  backend/lambdas/
-    createUploadUrl.js
-    getVideo.js
-    handleMediaConvertEvent.js
-    startMediaConvertJob.js
-    supervisorAgent.js
-  frontend/
-    src/
-      App.jsx
-      main.jsx
-      styles.css
-  infra/
-    bin/app.js
-    lib/video-platform-stack.js
+infra/                 CDK stacks
+functions/             Lambda handlers, one folder per function
+shared/                reusable JS services
+frontend/              React + Vite app
+workers/ffmpeg-worker/ ECS Fargate FFmpeg worker container
+scripts/               deployment and preflight scripts
+docs/                  architecture and IAM notes
+tests/                 unit and integration tests
 ```
 
-## Prerequisites
+## Deploy Prep
 
-- Node.js 18+
-- AWS CLI configured
-- AWS CDK bootstrapped in your account
-- A MediaConvert endpoint for your AWS region
-
-Find your MediaConvert endpoint:
+Create AWS and app configuration:
 
 ```bash
-aws mediaconvert describe-endpoints --region ap-south-1
+cp .env.example .env
 ```
 
-## Install
+Required before production deploy:
+
+- `MEDIACONVERT_ENDPOINT`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `CF_KEY_GROUP_ID`
+- `CF_KEY_PAIR_ID`
+- `ALERT_EMAIL`
+- `cloudfront/signing-key` secret in Secrets Manager
+- ECR image for `ffmpeg-worker`
+
+Build and push the FFmpeg worker:
 
 ```bash
-cd ai-video-platform/infra
-npm install
-
-cd ../frontend
-npm install
+bash scripts/build-and-push.sh
 ```
 
-## Deploy Infrastructure
+Run checks:
 
 ```bash
-cd ai-video-platform/infra
-npx cdk bootstrap
-npx cdk deploy \
-  -c mediaConvertEndpoint=https://abcd1234.mediaconvert.ap-south-1.amazonaws.com
+npm run preflight
+cd infra && npx cdk synth -c mediaConvertEndpoint=$MEDIACONVERT_ENDPOINT
+cd ../frontend && npm run build
 ```
 
-After deploy, copy these outputs:
-
-- `ApiUrl`
-- `CloudFrontDomain`
-
-## Run Frontend
-
-Create `frontend/.env`:
+## Deploy Order
 
 ```bash
-VITE_API_URL=https://your-api-id.execute-api.ap-south-1.amazonaws.com
+cd infra
+npx cdk deploy StorageStack
+npx cdk deploy AuthStack
+npx cdk deploy EventStack
+npx cdk deploy DeliveryStack
+npx cdk deploy PipelineStack
+npx cdk deploy ApiStack
+npx cdk deploy CustomTranscoderStack
+npx cdk deploy HardeningStack
 ```
 
-Then start:
+Then generate frontend environment values:
 
 ```bash
-cd ai-video-platform/frontend
-npm run dev
+bash scripts/post-deploy.sh
 ```
 
-## Current Limitations
+## Remaining Production Work
 
-- No Cognito authentication yet.
-- MediaConvert settings are intentionally minimal. After the first real upload works, tune bitrate ladders, thumbnails, subtitles, and error handling.
-- The AI Supervisor Agent currently uses deterministic JavaScript rules. Next, connect Bedrock so the plan is generated by an LLM.
-- Subtitle, moderation, thumbnail, and clip generation pipelines are represented in the plan but not implemented yet.
+- Run the real AWS integration test after deploying.
+- Narrow CloudFront bucket-policy `AWS:SourceArn` from same-account distribution wildcard to the exact distribution ARN if you move delivery-owned buckets into one stack.
+- Replace simple frontend page switching with React Router.
+- Expand unit tests around JWT verification, quota enforcement, deletion workflow, and worker job payloads.
+
