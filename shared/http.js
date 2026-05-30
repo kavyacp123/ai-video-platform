@@ -20,7 +20,13 @@ function parseBody(event) {
 
 function getUserId(event) {
   const claims = event.requestContext?.authorizer?.jwt?.claims || event.requestContext?.authorizer || {};
-  return claims.sub || claims.userId || "local-dev-user";
+  const userId = claims.sub || claims.userId;
+  if (!userId) {
+    const error = new Error("Authenticated user id is required");
+    error.statusCode = 401;
+    throw error;
+  }
+  return userId;
 }
 
 function errorResponse(error, fallbackStatus = 500) {
@@ -37,4 +43,3 @@ module.exports = {
   getUserId,
   errorResponse
 };
-

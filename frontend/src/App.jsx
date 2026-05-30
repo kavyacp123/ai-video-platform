@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+import { signInWithRedirect } from "aws-amplify/auth";
 import {
   BrainCircuit,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   UploadCloud,
   Video
 } from "lucide-react";
+import { api } from "./services/api.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -56,13 +58,6 @@ function App() {
     }
   }, [video?.playbackUrl]);
 
-  const authHeaders = useMemo(
-    () => ({
-      authorization: `Bearer ${localStorage.getItem("demo_token") || "local-dev-token"}`
-    }),
-    []
-  );
-
   const createUploadAndSendFile = async () => {
     if (!file || !canUseApi) {
       return;
@@ -73,25 +68,12 @@ function App() {
     setMessage("Creating secure upload URL...");
 
     try {
-      const createResponse = await fetch(`${API_URL}/upload-url`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...authHeaders },
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type || "video/mp4",
-          fileSize: file.size
-        })
-      });
-
-      if (!createResponse.ok) {
-        throw new Error("Could not create upload URL.");
-      }
-
-      const uploadConfig = await createResponse.json();
+      const uploadConfig = await api.getUploadUrl(file.name, file.type || "video/mp4", file.size);
+      if (uploadConfig.error) throw new Error(uploadConfig.message || uploadConfig.error);
       setVideo({ videoId: uploadConfig.videoId, status: "UPLOAD_URL_CREATED" });
       setMessage("Uploading directly to S3...");
 
-      await uploadWithProgress(uploadConfig.uploadUrl, file, (progress) => setUploadProgress(progress));
+      await api.uploadToS3(uploadConfig.uploadUrl, file, (progress) => setUploadProgress(progress));
 
       setMessage("Upload complete. MediaConvert will start soon.");
       await refreshVideo(uploadConfig.videoId);
@@ -107,24 +89,16 @@ function App() {
       return;
     }
 
-    const response = await fetch(`${API_URL}/video/${videoId}`, { headers: authHeaders });
-    if (!response.ok) {
-      setMessage("Video record is not available yet.");
-      return;
-    }
-
-    const data = await response.json();
+    const data = await api.getVideo(videoId);
+    if (data.error) throw new Error(data.message || data.error);
     setVideo(data);
     setMessage(statusLabels[data.status] || data.status || "Video updated.");
   };
 
   const loadLibrary = async () => {
     if (!canUseApi) return;
-    const response = await fetch(`${API_URL}/videos`, { headers: authHeaders });
-    if (response.ok) {
-      const data = await response.json();
-      setLibrary(data.items || []);
-    }
+    const data = await api.listVideos();
+    setLibrary(data.items || []);
   };
 
   return (
@@ -283,9 +257,9 @@ function AuthPage() {
         <LogIn size={22} />
         <h2>Auth</h2>
       </div>
-      <p>Cognito Hosted UI and Google OAuth are configured in CDK. Before deploy, add your Google provider secrets and frontend callback URL.</p>
+      <p>Cognito Hosted UI and Google OAuth are configured in CDK. Sign in to upload and manage videos.</p>
       <div className="actions">
-        <button onClick={() => localStorage.setItem("demo_token", "local-dev-token")}>Use Local Dev Token</button>
+        <button onClick={() => signInWithRedirect({ provider: "Google" })}>Continue With Google</button>
       </div>
     </section>
   );
@@ -345,25 +319,6 @@ function PlanFlag({ label, enabled }) {
       <strong>{enabled ? "On" : "Off"}</strong>
     </div>
   );
-}
-
-function uploadWithProgress(url, file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress(Math.round((event.loaded / event.total) * 100));
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error("S3 upload failed."));
-    };
-    xhr.onerror = () => reject(new Error("S3 upload failed."));
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("content-type", file.type || "video/mp4");
-    xhr.send(file);
-  });
 }
 
 export default App;
