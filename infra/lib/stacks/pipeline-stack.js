@@ -134,6 +134,9 @@ export class PipelineStack extends BaseStack {
     this.addRolePolicy(startTranscode.role, ["mediaconvert:CreateJob"], ["*"]);
     this.addRolePolicy(mediaConvertCallback.role, ["states:SendTaskSuccess", "states:SendTaskFailure"], ["*"]);
     ffmpegQueue.grantSendMessages(startFfmpegJob.fn);
+    ffmpegQueue.grantSendMessages(extractFrames.fn);
+    ffmpegQueue.grantSendMessages(generateThumbnail.fn);
+    ffmpegQueue.grantSendMessages(generateClips.fn);
     this.addRolePolicy(pollTranscode.role, ["mediaconvert:GetJob"], ["*"]);
     this.addRolePolicy(startTranscription.role, ["transcribe:StartTranscriptionJob"], ["*"]);
     this.addRolePolicy(pollTranscription.role, ["transcribe:GetTranscriptionJob"], ["*"]);
@@ -223,6 +226,16 @@ export class PipelineStack extends BaseStack {
         sfn.Condition.not(sfn.Condition.stringEquals("$.plan.moderationLevel", "none")),
         new tasks.LambdaInvoke(this, "ExtractFrames", {
           lambdaFunction: extractFrames.fn,
+          integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+          heartbeat: Duration.hours(1),
+          payload: sfn.TaskInput.fromObject({
+            "videoId.$": "$.videoId",
+            "userId.$": "$.userId",
+            "s3Key.$": "$.s3Key",
+            "rawBucket.$": "$.rawBucket",
+            "plan.$": "$.plan",
+            taskToken: sfn.JsonPath.taskToken
+          }),
           outputPath: "$.Payload"
         })
           .addRetry(retry)
@@ -240,6 +253,16 @@ export class PipelineStack extends BaseStack {
         sfn.Condition.booleanEquals("$.plan.generateThumbnail", true),
         new tasks.LambdaInvoke(this, "GenerateThumbnail", {
           lambdaFunction: generateThumbnail.fn,
+          integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+          heartbeat: Duration.hours(1),
+          payload: sfn.TaskInput.fromObject({
+            "videoId.$": "$.videoId",
+            "userId.$": "$.userId",
+            "s3Key.$": "$.s3Key",
+            "rawBucket.$": "$.rawBucket",
+            "plan.$": "$.plan",
+            taskToken: sfn.JsonPath.taskToken
+          }),
           outputPath: "$.Payload"
         }).addRetry(retry)
       )
@@ -250,6 +273,16 @@ export class PipelineStack extends BaseStack {
         sfn.Condition.booleanEquals("$.plan.generateHighlights", true),
         new tasks.LambdaInvoke(this, "GenerateClips", {
           lambdaFunction: generateClips.fn,
+          integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
+          heartbeat: Duration.hours(1),
+          payload: sfn.TaskInput.fromObject({
+            "videoId.$": "$.videoId",
+            "userId.$": "$.userId",
+            "s3Key.$": "$.s3Key",
+            "rawBucket.$": "$.rawBucket",
+            "plan.$": "$.plan",
+            taskToken: sfn.JsonPath.taskToken
+          }),
           outputPath: "$.Payload"
         }).addRetry(retry)
       )

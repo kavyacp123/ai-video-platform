@@ -1,6 +1,6 @@
 const { spawn } = require("child_process");
 const { createWriteStream } = require("fs");
-const { mkdir, readdir, rm, stat } = require("fs/promises");
+const { mkdir, readdir, rm } = require("fs/promises");
 const path = require("path");
 const { pipeline } = require("stream/promises");
 const { S3Client, GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
@@ -66,6 +66,18 @@ async function processJob(job) {
   await mkdir(outputRoot, { recursive: true });
   await downloadToFile(job.sourceBucket, job.s3Key, inputPath);
 
+  if (job.jobType === "THUMBNAIL") {
+    return processThumbnailJob(job, inputPath, outputRoot);
+  }
+
+  if (job.jobType === "FRAME_EXTRACTION") {
+    return processFrameExtractionJob(job, inputPath, outputRoot);
+  }
+
+  if (job.jobType === "CLIP_GENERATION") {
+    return processClipGenerationJob(job, inputPath, outputRoot);
+  }
+
   const hlsKeys = {};
   await Promise.all(
     (job.resolutions || ["480p"]).map(async (resolution) => {
@@ -119,6 +131,45 @@ async function processJob(job) {
   return { videoId: job.videoId, hlsKeys };
 }
 
+async function processThumbnailJob(job, inputPath, outputRoot) {
+  const dir = path.join(outputRoot, "thumbnails", job.videoId);
+  await mkdir(dir, { recursive: true });
+  const output = path.join(dir, "poster.jpg");
+  await runFfmpeg(["-y", "-ss", "1", "-i", inputPath, "-frames:v", "1", "-q:v", "2", output]);
+  await uploadTree(outputRoot, job.outputBucket, "");
+  return {
+    videoId: job.videoId,
+    thumbnailKey: `thumbnails/${job.videoId}/poster.jpg`,
+    thumbnailUrl: `thumbnails/${job.videoId}/poster.jpg`
+  };
+}
+
+async function processFrameExtractionJob(job, inputPath, outputRoot) {
+  const dir = path.join(outputRoot, job.videoId, "frames");
+  await mkdir(dir, { recursive: true });
+  await runFfmpeg(["-y", "-i", inputPath, "-vf", "fps=1/30", "-q:v", "3", path.join(dir, "frame-%03d.jpg")]);
+  await uploadTree(outputRoot, job.outputBucket, "");
+  const files = await readdir(dir);
+  return {
+    videoId: job.videoId,
+    userId: job.userId,
+    plan: { moderationLevel: job.moderationLevel || "standard" },
+    frameS3Keys: files.filter((file) => file.endsWith(".jpg")).map((file) => `${job.videoId}/frames/${file}`)
+  };
+}
+
+async function processClipGenerationJob(job, inputPath, outputRoot) {
+  const dir = path.join(outputRoot, "clips", job.videoId);
+  await mkdir(dir, { recursive: true });
+  const output = path.join(dir, "highlight-1.mp4");
+  await runFfmpeg(["-y", "-i", inputPath, "-ss", "0", "-t", "15", "-c:v", "libx264", "-c:a", "aac", output]);
+  await uploadTree(outputRoot, job.outputBucket, "");
+  return {
+    videoId: job.videoId,
+    clips: [{ title: "Auto highlight 1", startSeconds: 0, endSeconds: 15, s3Key: `clips/${job.videoId}/highlight-1.mp4` }]
+  };
+}
+
 async function downloadToFile(bucket, key, filePath) {
   const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   await pipeline(result.Body, createWriteStream(filePath));
@@ -137,7 +188,7 @@ async function uploadTree(root, bucket, prefix) {
   await Promise.all(
     files.map(async (file) => {
       const relative = path.relative(root, file);
-      const key = `${prefix}/${relative}`;
+      const key = prefix ? `${prefix}/${relative}` : relative;
       const body = require("fs").createReadStream(file);
       await s3.send(
         new PutObjectCommand({
@@ -181,4 +232,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
