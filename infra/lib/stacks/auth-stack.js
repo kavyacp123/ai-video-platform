@@ -53,6 +53,14 @@ export class AuthStack extends BaseStack {
       }
     });
 
+    const frontendOrigin = (
+      this.node.tryGetContext("frontendOrigin") ||
+      process.env.FRONTEND_ORIGIN ||
+      "http://localhost:5173"
+    ).replace(/\/$/, "");
+    const callbackUrls = Array.from(new Set(["http://localhost:5173/auth/callback", `${frontendOrigin}/auth/callback`]));
+    const logoutUrls = Array.from(new Set(["http://localhost:5173", frontendOrigin]));
+
     this.userPoolClient = new cognito.UserPoolClient(this, "FrontendUserPoolClient", {
       userPool: this.userPool,
       generateSecret: false,
@@ -65,11 +73,8 @@ export class AuthStack extends BaseStack {
       },
       oAuth: {
         flows: { authorizationCodeGrant: true },
-        callbackUrls: [
-          "http://localhost:5173/auth/callback",
-          this.node.tryGetContext("frontendCallbackUrl") || "https://yourdomain.com/auth/callback"
-        ],
-        logoutUrls: ["http://localhost:5173", this.node.tryGetContext("frontendLogoutUrl") || "https://yourdomain.com"]
+        callbackUrls,
+        logoutUrls
       },
       accessTokenValidity: Duration.hours(1),
       idTokenValidity: Duration.hours(1)
