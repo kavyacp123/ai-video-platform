@@ -174,7 +174,7 @@ export class PipelineStack extends BaseStack {
     const startFfmpeg = new tasks.LambdaInvoke(this, "StartFFmpegJob", {
       lambdaFunction: startFfmpegJob.fn,
       integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-      heartbeat: Duration.hours(1),
+      heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
       payload: sfn.TaskInput.fromObject({
         "videoId.$": "$.videoId",
         "userId.$": "$.userId",
@@ -227,7 +227,7 @@ export class PipelineStack extends BaseStack {
         new tasks.LambdaInvoke(this, "ExtractFrames", {
           lambdaFunction: extractFrames.fn,
           integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-          heartbeat: Duration.hours(1),
+          heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
           payload: sfn.TaskInput.fromObject({
             "videoId.$": "$.videoId",
             "userId.$": "$.userId",
@@ -254,7 +254,7 @@ export class PipelineStack extends BaseStack {
         new tasks.LambdaInvoke(this, "GenerateThumbnail", {
           lambdaFunction: generateThumbnail.fn,
           integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-          heartbeat: Duration.hours(1),
+          heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
           payload: sfn.TaskInput.fromObject({
             "videoId.$": "$.videoId",
             "userId.$": "$.userId",
@@ -274,7 +274,7 @@ export class PipelineStack extends BaseStack {
         new tasks.LambdaInvoke(this, "GenerateClips", {
           lambdaFunction: generateClips.fn,
           integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-          heartbeat: Duration.hours(1),
+          heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
           payload: sfn.TaskInput.fromObject({
             "videoId.$": "$.videoId",
             "userId.$": "$.userId",

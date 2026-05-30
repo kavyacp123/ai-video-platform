@@ -69,6 +69,10 @@ export class CustomTranscoderStack extends BaseStack {
     props.storage.processedBucket.grantReadWrite(task.taskRole);
     props.eventBus.grantPutEventsTo(task.taskRole);
 
+    const workerLogGroup = new logs.LogGroup(this, "FfmpegWorkerLogGroup", {
+      retention: logs.RetentionDays.ONE_MONTH
+    });
+
     task.addContainer("FfmpegWorker", {
       image: ecs.ContainerImage.fromEcrRepository(
         ecr.Repository.fromRepositoryName(this, "FFmpegRepo", "ffmpeg-worker"),
@@ -76,7 +80,7 @@ export class CustomTranscoderStack extends BaseStack {
       ),
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "ffmpeg-worker",
-        logRetention: logs.RetentionDays.ONE_MONTH
+        logGroup: workerLogGroup
       }),
       environment: env
     });
@@ -85,6 +89,8 @@ export class CustomTranscoderStack extends BaseStack {
       cluster: this.cluster,
       taskDefinition: task,
       desiredCount: 0,
+      circuitBreaker: { rollback: true },
+      minHealthyPercent: 100,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC }
     });

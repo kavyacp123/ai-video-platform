@@ -33,6 +33,10 @@ export class BaseStack extends Stack {
 
     role.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
 
+    const logGroup = new logs.LogGroup(this, `${id}LogGroup`, {
+      retention: logs.RetentionDays.ONE_MONTH
+    });
+
     const fn = new lambda.Function(this, id, {
       runtime: lambda.Runtime.NODEJS_20_X,
       architecture: lambda.Architecture.ARM_64,
@@ -42,7 +46,7 @@ export class BaseStack extends Stack {
       memorySize: props.memorySize || 256,
       role,
       tracing: lambda.Tracing.ACTIVE,
-      logRetention: logs.RetentionDays.ONE_MONTH,
+      logGroup,
       environment: this.commonEnvironment(props.environment)
     });
 
@@ -58,4 +62,3 @@ export class BaseStack extends Stack {
     );
   }
 }
-
