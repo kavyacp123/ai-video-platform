@@ -30,16 +30,19 @@ const delivery = new DeliveryStack(app, "DeliveryStack", {
   thumbnailsBucket: storage.thumbnailsBucket,
   subtitleBucket: storage.subtitleBucket
 });
+const mediaConvertEndpoint = app.node.tryGetContext("mediaConvertEndpoint") || process.env.MEDIACONVERT_ENDPOINT;
+if (!mediaConvertEndpoint) {
+  throw new Error(
+    "Missing MediaConvert endpoint. Set MEDIACONVERT_ENDPOINT or pass -c mediaConvertEndpoint=https://xxxx.mediaconvert.<region>.amazonaws.com"
+  );
+}
 const pipeline = new PipelineStack(app, "PipelineStack", {
   env,
   storage,
   eventBus: events.bus,
   cloudFrontDomain: delivery.distribution.distributionDomainName,
   cloudFrontDistributionId: delivery.distribution.distributionId,
-  mediaConvertEndpoint:
-    app.node.tryGetContext("mediaConvertEndpoint") ||
-    process.env.MEDIACONVERT_ENDPOINT ||
-    "https://example.mediaconvert.ap-south-1.amazonaws.com"
+  mediaConvertEndpoint
 });
 const api = new ApiStack(app, "ApiStack", {
   env,
