@@ -45,6 +45,10 @@ export class PipelineStack extends BaseStack {
     const validateInput = this.createLambda("ValidateInputFunction", "validate-input", { environment: env });
     const aggregateResults = this.createLambda("AggregateResultsFunction", "aggregate-results", { environment: env });
     const handleFailure = this.createLambda("HandleFailureFunction", "handle-failure", { environment: env });
+    const generateMetadata = this.createLambda("GenerateMetadataFunction", "generate-metadata", {
+      timeout: Duration.seconds(30),
+      environment: env
+    });
     const startTranscode = this.createLambda("StartTranscodeFunction", "start-transcode", {
       timeout: Duration.seconds(30),
       environment: env
@@ -94,6 +98,7 @@ export class PipelineStack extends BaseStack {
       validateInput,
       aggregateResults,
       handleFailure,
+      generateMetadata,
       startTranscode,
       mediaConvertCallback,
       startFfmpegJob,
@@ -131,6 +136,7 @@ export class PipelineStack extends BaseStack {
     props.storage.thumbnailsBucket.grantReadWrite(deleteS3Prefix.fn);
     mediaConvertRole.grantPassRole(startTranscode.fn);
     this.addRolePolicy(supervisor.role, ["bedrock:InvokeModel"], ["*"]);
+    this.addRolePolicy(generateMetadata.role, ["bedrock:InvokeModel"], ["*"]);
     this.addRolePolicy(startTranscode.role, ["mediaconvert:CreateJob"], ["*"]);
     this.addRolePolicy(mediaConvertCallback.role, ["states:SendTaskSuccess", "states:SendTaskFailure"], ["*"]);
     ffmpegQueue.grantSendMessages(startFfmpegJob.fn);
@@ -288,12 +294,19 @@ export class PipelineStack extends BaseStack {
       )
       .otherwise(new sfn.Pass(this, "SkipClips"));
 
-    const parallel = new sfn.Parallel(this, "ParallelPipelines")
+    const parallel = new sfn.Parallel(this, "ParallelPipelines", {
+      resultPath: "$.pipelineResults"
+    })
       .branch(transcodeChoice)
       .branch(subtitleBranch)
       .branch(moderationBranch)
       .branch(thumbnailBranch)
       .branch(clipsBranch);
+
+    const metadata = new tasks.LambdaInvoke(this, "GenerateMetadata", {
+      lambdaFunction: generateMetadata.fn,
+      outputPath: "$.Payload"
+    }).addRetry(retry);
 
     const aggregate = new tasks.LambdaInvoke(this, "AggregateResults", {
       lambdaFunction: aggregateResults.fn,
@@ -305,7 +318,7 @@ export class PipelineStack extends BaseStack {
       outputPath: "$.Payload"
     });
 
-    const definition = validate.next(parallel).next(aggregate);
+    const definition = validate.next(parallel).next(metadata).next(aggregate);
     parallel.addCatch(failure, { resultPath: "$.failure" });
 
     this.stateMachine = new sfn.StateMachine(this, "VideoProcessingPipeline", {

@@ -12,6 +12,7 @@ JavaScript-only AWS CDK project for an event-driven AI video platform.
 - DynamoDB single-table data model with user, video, event, idempotency, and circuit-breaker records
 - EventBridge bus and typed event utilities
 - AI Supervisor Agent using Bedrock Nova Lite, DynamoDB idempotency, and DynamoDB-backed circuit breaker
+- AI Metadata Agent that generates title, description, tags, and category before the video is marked ready
 - Step Functions Express processing pipeline
 - MediaConvert path using `waitForTaskToken`
 - Custom FFmpeg ECS Fargate worker path using SQS FIFO and Step Functions task callbacks
@@ -93,4 +94,3 @@ bash scripts/post-deploy.sh
 - Narrow CloudFront bucket-policy `AWS:SourceArn` from same-account distribution wildcard to the exact distribution ARN if you move delivery-owned buckets into one stack.
 - Replace simple frontend page switching with React Router.
 - Expand unit tests around JWT verification, quota enforcement, deletion workflow, and worker job payloads.
-

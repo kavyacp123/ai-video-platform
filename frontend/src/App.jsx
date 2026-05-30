@@ -206,6 +206,18 @@ function App() {
 
         {video && (
           <dl className="metadata">
+            {video.title && (
+              <div>
+                <dt>AI Title</dt>
+                <dd>{video.title}</dd>
+              </div>
+            )}
+            {video.category && (
+              <div>
+                <dt>Category</dt>
+                <dd>{video.category}</dd>
+              </div>
+            )}
             <div>
               <dt>Video ID</dt>
               <dd>{video.videoId}</dd>
@@ -220,6 +232,18 @@ function App() {
                 <dd>{video.playbackUrl}</dd>
               </div>
             )}
+            {video.description && (
+              <div>
+                <dt>Description</dt>
+                <dd>{video.description}</dd>
+              </div>
+            )}
+            {Array.isArray(video.tags) && video.tags.length > 0 && (
+              <div>
+                <dt>Tags</dt>
+                <dd>{video.tags.join(", ")}</dd>
+              </div>
+            )}
           </dl>
         )}
 
@@ -231,16 +255,14 @@ function App() {
             </div>
             <p>{video.processingPlan.reason}</p>
             <div className="plan-grid">
-              <PlanFlag label="HLS" enabled={video.processingPlan.generateHls} />
+              <PlanFlag label="HLS" enabled={Boolean(video.processingPlan.outputResolutions?.length)} />
               <PlanFlag label="Subtitles" enabled={video.processingPlan.generateSubtitles} />
               <PlanFlag label="Thumbnail" enabled={video.processingPlan.generateThumbnail} />
               <PlanFlag label="Highlights" enabled={video.processingPlan.generateHighlights} />
             </div>
             <div className="renditions">
-              {(video.processingPlan.renditions || []).map((rendition) => (
-                <span key={rendition.name}>
-                  {rendition.name} · {rendition.bitrate / 1000000} Mbps
-                </span>
+              {(video.processingPlan.outputResolutions || []).map((resolution) => (
+                <span key={resolution}>{resolution}</span>
               ))}
             </div>
           </section>

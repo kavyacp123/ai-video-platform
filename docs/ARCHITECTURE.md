@@ -11,6 +11,7 @@ React + HLS.js
   -> AI_PLAN_CREATED
   -> Step Functions Express pipeline
   -> MediaConvert / Transcribe / Rekognition / Translate / thumbnail / clips
+  -> AI Metadata Agent
   -> CloudFront HLS delivery
   -> WebSocket + SNS-ready notification path
 ```
@@ -23,6 +24,7 @@ React + HLS.js
 - Section 4: DynamoDB single-table design and service class
 - Section 5: EventBridge bus, events, parser, publisher, SQS queues and DLQ
 - Section 6: AI Supervisor Agent with Bedrock integration, fallback plan, idempotency, circuit breaker
+- Section 6b: AI Metadata Agent with Bedrock-generated title, description, tags, and category
 - Section 7: Step Functions Express pipeline
 - Section 8: MediaConvert HLS job builder and poller
 - Section 9: Subtitle and moderation agent handlers
