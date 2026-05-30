@@ -2,6 +2,8 @@ import { CfnOutput, Duration } from "aws-cdk-lib";
 import * as apigwv2 from "aws-cdk-lib/aws-apigatewayv2";
 import * as integrations from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import * as authorizers from "aws-cdk-lib/aws-apigatewayv2-authorizers";
+import * as events from "aws-cdk-lib/aws-events";
+import * as targets from "aws-cdk-lib/aws-events-targets";
 import { BaseStack } from "../base-stack.js";
 
 export class ApiStack extends BaseStack {
@@ -91,6 +93,31 @@ export class ApiStack extends BaseStack {
       webSocketApi: this.webSocketApi,
       stageName: "prod",
       autoDeploy: true
+    });
+
+    const notification = this.createApiLambda("NotificationFunction", "notification", {
+      ...env,
+      WEBSOCKET_CALLBACK_URL: stage.callbackUrl
+    });
+    props.storage.table.grantReadWriteData(notification.fn);
+    this.addRolePolicy(notification.role, ["execute-api:ManageConnections"], ["*"]);
+
+    new events.Rule(this, "VideoReadyNotificationRule", {
+      eventBus: props.eventBus,
+      eventPattern: {
+        source: ["video-platform"],
+        detailType: ["VIDEO_READY"]
+      },
+      targets: [new targets.LambdaFunction(notification.fn)]
+    });
+
+    new events.Rule(this, "VideoFailedNotificationRule", {
+      eventBus: props.eventBus,
+      eventPattern: {
+        source: ["video-platform"],
+        detailType: ["VIDEO_FAILED"]
+      },
+      targets: [new targets.LambdaFunction(notification.fn)]
     });
 
     new CfnOutput(this, "ApiGatewayUrl", { value: this.httpApi.apiEndpoint });

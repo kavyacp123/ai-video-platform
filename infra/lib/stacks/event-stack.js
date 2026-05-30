@@ -31,25 +31,7 @@ export class EventStack extends BaseStack {
       deadLetterQueue: { queue: this.agentDlq, maxReceiveCount: 3 }
     });
 
-    const notification = this.createLambda("NotificationFunction", "notification", {
-      environment: {
-        TABLE_NAME: props.table.tableName,
-        WEBSOCKET_CALLBACK_URL: "https://example.execute-api.local/dev"
-      }
-    });
-    props.table.grantReadWriteData(notification.fn);
-    this.addRolePolicy(notification.role, ["execute-api:ManageConnections"], ["*"]);
-
     const alert = this.createLambda("AlertFunction", "alert");
-
-    new events.Rule(this, "VideoReadyRule", {
-      eventBus: this.bus,
-      eventPattern: {
-        source: ["video-platform"],
-        detailType: ["VIDEO_READY"]
-      },
-      targets: [new targets.LambdaFunction(notification.fn)]
-    });
 
     new events.Rule(this, "VideoFailedRule", {
       eventBus: this.bus,
@@ -66,4 +48,3 @@ export class EventStack extends BaseStack {
     new CfnOutput(this, "AgentDlqUrl", { value: this.agentDlq.queueUrl });
   }
 }
-
