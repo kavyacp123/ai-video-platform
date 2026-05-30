@@ -30,9 +30,9 @@ React + HLS.js
 - Section 11: WebSocket notification handlers and React hook
 - Section 12: React pages/components in JSX
 - Section 13: X-Ray enabled on Lambdas and Step Functions; structured logger helper
-- Section 14: JWT authorizer skeleton, Secrets Manager helper, least-privilege roles
+- Section 14: JWT authorizer, Secrets Manager helper, least-privilege roles, WAF, KMS, alarms
 - Section 15: env example, GitHub Actions workflow, tests
-- Phase 2: Custom FFmpeg transcoder data plane with SQS + ECS Fargate worker scaffold
+- Phase 2: Custom FFmpeg transcoder data plane with SQS + ECS Fargate worker
 - Completion pass: async deletion workflow, CloudFront OAC hardening, and KMS-backed sensitive storage
 
 ## Phase 2 Custom Transcoder
@@ -49,7 +49,13 @@ Step Functions
   -> CloudFront playback
 ```
 
-Worker code lives in `workers/ffmpeg-worker`. The CDK stack uses a registry placeholder image for synth safety. For real deployment, build and push the worker Dockerfile to ECR, then replace the container image in `CustomTranscoderStack`.
+Worker code lives in `workers/ffmpeg-worker`. The CDK stack reads the image from the `ffmpeg-worker` ECR repository using `IMAGE_TAG` or `latest`.
+
+Before deploying the worker stack, build and push the container:
+
+```bash
+bash scripts/build-and-push.sh
+```
 
 ## Deployment Order
 
@@ -61,11 +67,15 @@ npx cdk deploy EventStack
 npx cdk deploy DeliveryStack
 npx cdk deploy ApiStack
 npx cdk deploy PipelineStack
+npx cdk deploy CustomTranscoderStack
+npx cdk deploy HardeningStack
 ```
 
-## Important Hardening TODO
+## Production Notes
 
-CloudFront OAC is now attached in `DeliveryStack`, and processed/subtitle/thumbnail buckets include CloudFront-service-principal read policies. The policy uses a same-account CloudFront distribution ARN wildcard to avoid cross-stack dependency cycles. For a stricter production deployment, split delivery-owned buckets into the same stack as CloudFront or import a concrete distribution id after first deploy and narrow `AWS:SourceArn` to one distribution.
+CloudFront OAC is attached in `DeliveryStack`, and processed/subtitle/thumbnail buckets include CloudFront-service-principal read policies. The policy uses a same-account CloudFront distribution ARN wildcard to avoid cross-stack dependency cycles. For a stricter production deployment, split delivery-owned buckets into the same stack as CloudFront or import a concrete distribution id after first deploy and narrow `AWS:SourceArn` to one distribution.
+
+The production safety stack adds WAF, alarms, and shared KMS encryption. A deployment still needs real account-specific values for Google OAuth, CloudFront signing keys, MediaConvert endpoint, alert email, and the FFmpeg worker image.
 
 ## Deletion Workflow
 
