@@ -8,9 +8,8 @@ OUTPUTS=$(aws cloudformation describe-stacks --query 'Stacks[*].Outputs' --outpu
   echo "VITE_IDENTITY_POOL_ID=$(echo "$OUTPUTS" | jq -r '.. | .IdentityPoolId? | select(. != null)' | head -1)"
   echo "VITE_COGNITO_DOMAIN=$(echo "$OUTPUTS" | jq -r '.. | .CognitoDomain? | select(. != null)' | head -1)"
   echo "VITE_API_URL=$(echo "$OUTPUTS" | jq -r '.. | .ApiGatewayUrl? | select(. != null)' | head -1)"
-  echo "VITE_WS_URL=$(echo "$OUTPUTS" | jq -r '.. | .WebSocketUrl? | select(. != null)' | head -1)"
+  echo "VITE_WEBSOCKET_URL=$(echo "$OUTPUTS" | jq -r '.. | .WebSocketUrl? | select(. != null)' | head -1)"
   echo "VITE_CF_DOMAIN=$(echo "$OUTPUTS" | jq -r '.. | .CloudFrontDomain? | select(. != null)' | head -1)"
 } > frontend/.env.local
 
 echo ".env.local written for frontend"
-
