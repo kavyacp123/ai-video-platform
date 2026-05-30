@@ -20,7 +20,11 @@ export class PipelineStack extends BaseStack {
       EVENT_BUS_NAME: props.eventBus.eventBusName,
       CLOUDFRONT_DOMAIN: props.cloudFrontDomain,
       CLOUDFRONT_DISTRIBUTION_ID: props.cloudFrontDistributionId || "",
-      MEDIACONVERT_ENDPOINT: props.mediaConvertEndpoint
+      MEDIACONVERT_ENDPOINT: props.mediaConvertEndpoint,
+      // AI Thumbnail Selection
+      ENABLE_AI_THUMBNAIL_SELECTION: process.env.ENABLE_AI_THUMBNAIL_SELECTION || "true",
+      // AI Clip Selection
+      ENABLE_AI_CLIP_SELECTION: process.env.ENABLE_AI_CLIP_SELECTION || "true"
     };
 
     const mediaConvertRole = new iam.Role(this, "MediaConvertRole", {
@@ -137,6 +141,17 @@ export class PipelineStack extends BaseStack {
     mediaConvertRole.grantPassRole(startTranscode.fn);
     this.addRolePolicy(supervisor.role, ["bedrock:InvokeModel"], ["*"]);
     this.addRolePolicy(generateMetadata.role, ["bedrock:InvokeModel"], ["*"]);
+    // AI Thumbnail & Clips - Add Bedrock and Rekognition permissions
+    this.addRolePolicy(generateThumbnail.role, [
+      "bedrock:InvokeModel",
+      "rekognition:DetectLabels",
+      "rekognition:DetectFaces"
+    ], ["*"]);
+    this.addRolePolicy(generateClips.role, [
+      "bedrock:InvokeModel",
+      "rekognition:DetectLabels",
+      "transcribe:GetTranscriptionJob"
+    ], ["*"]);
     this.addRolePolicy(startTranscode.role, ["mediaconvert:CreateJob"], ["*"]);
     this.addRolePolicy(mediaConvertCallback.role, ["states:SendTaskSuccess", "states:SendTaskFailure"], ["*"]);
     ffmpegQueue.grantSendMessages(startFfmpegJob.fn);

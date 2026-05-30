@@ -8,6 +8,34 @@ const { VIDEO_STATUS } = require("../../shared/constants");
 const mediaConvert = new MediaConvertClient({ endpoint: process.env.MEDIACONVERT_ENDPOINT });
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
+/**
+ * Start MediaConvert transcoding job
+ *
+ * Called from Step Functions pipeline after AI plan is created.
+ * Creates HLS transcoding job for multiple output resolutions.
+ * Stores task token for Step Functions callback pattern.
+ *
+ * @param {Object} input - Step Functions input
+ * @param {string} input.videoId - Video ID
+ * @param {string} input.userId - User ID (for tracking)
+ * @param {string} input.s3Key - Raw video S3 key
+ * @param {string} input.rawBucket - S3 bucket with raw video
+ * @param {Object} input.plan - Processing plan with outputResolutions
+ * @param {string} input.taskToken - Step Functions task token (for callbacks)
+ *
+ * @returns {Object} {...input, mediaConvertJobId: string}
+ *
+ * Output:
+ * - HLS files stored in s3://{PROCESSED_BUCKET}/hls/{videoId}/
+ * - master.m3u8 playlist created
+ * - Renditions: 720p, 480p, 360p (based on plan)
+ * - Codec: H.264, AAC audio
+ * - Segment length: 6 seconds
+ *
+ * Callback:
+ * - Uses waitForTaskToken pattern
+ * - mediaconvert-callback Lambda will send success/failure back to Step Functions
+ */
 exports.handler = async (input) => {
   const renditions = (input.plan.outputResolutions || ["480p"]).map(resolutionToRendition);
   const destination = `s3://${process.env.PROCESSED_BUCKET_NAME}/hls/${input.videoId}/`;

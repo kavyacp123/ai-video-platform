@@ -7,6 +7,52 @@ const { fallbackPlan, ruleBasedPlan, applyBusinessRules } = require("../../share
 const circuitBreaker = require("../../shared/circuitBreaker");
 const logger = require("../../shared/logger");
 
+/**
+ * AI Supervisor: Orchestrates video processing pipeline strategy
+ *
+ * Triggered by S3 ObjectCreated events via EventBridge.
+ * Generates an optimal video processing plan using AWS Bedrock (with circuit breaker fallback).
+ * Updates video status to AI_PLAN_CREATED and publishes event for pipeline orchestration.
+ *
+ * Flow:
+ * 1. Normalize S3 event from EventBridge
+ * 2. Mark event as processed (idempotency)
+ * 3. Fetch user tier to determine constraints
+ * 4. Call Bedrock AI (Nova Lite) to generate processing plan
+ * 5. If Bedrock fails/unavailable: use rule-based fallback
+ * 6. Apply business rules (tier-based feature restrictions)
+ * 7. Update video status and publish AI_PLAN_CREATED event
+ * 8. Pipeline picks up from there
+ *
+ * @param {Object} event - EventBridge event from S3:ObjectCreated notification
+ * @param {string} event.id - EventBridge event ID (for idempotency)
+ * @param {string} event.source - Should be "aws.s3"
+ * @param {Object} event.detail.object.key - S3 key path in format: uploads/{userId}/{videoId}/{filename}
+ *
+ * @returns {Promise<void>}
+ *
+ * Throws:
+ * - If required fields missing (videoId, userId, s3Key)
+ * - If Bedrock AND rule-based fallback fail
+ * - Publishes VIDEO_FAILED event on error
+ *
+ * Processing Plan Structure:
+ * {
+ *   generateSubtitles: bool,
+ *   subtitleLanguages: ["en", "es", ...],
+ *   generateThumbnail: bool,
+ *   generateHighlights: bool,
+ *   moderationLevel: "none" | "standard" | "strict",
+ *   outputResolutions: ["720p", "480p", "360p"],
+ *   priority: "low" | "normal" | "high"
+ * }
+ *
+ * Circuit Breaker:
+ * - CLOSED: Normal - call Bedrock
+ * - OPEN: Bedrock failing - use fallback
+ * - HALF_OPEN: Testing recovery
+ * Threshold: 5 failures, resets after 60 seconds
+ */
 exports.handler = async (event) => {
   const startedAt = Date.now();
   let detail;
