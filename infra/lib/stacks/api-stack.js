@@ -51,6 +51,14 @@ export class ApiStack extends BaseStack {
     const createViolationReport = this.createApiLambda("CreateViolationReportFunction", "create-violation-report", env);
     const getAuditLogs = this.createApiLambda("GetAuditLogsFunction", "get-audit-logs", env);
 
+    // Advanced Features
+    const getRecommendations = this.createApiLambda("GetRecommendationsFunction", "get-recommendations", env);
+    const sendNotification = this.createApiLambda("SendNotificationFunction", "send-notification", {
+      ...env,
+      SNS_TOPIC_ARN: process.env.SNS_TOPIC_ARN || ""
+    });
+    const generateHeatmap = this.createApiLambda("GenerateHeatmapFunction", "generate-heatmap", env);
+
     this.criticalFunctions = [uploadUrl.fn, getStream.fn, jwtAuthorizerFn.fn];
 
     props.storage.table.grantReadWriteData(uploadUrl.fn);
@@ -77,6 +85,11 @@ export class ApiStack extends BaseStack {
     // Grant permissions for admin
     props.storage.table.grantReadWriteData(createViolationReport.fn);
     props.storage.table.grantReadData(getAuditLogs.fn);
+
+    // Grant permissions for advanced features
+    props.storage.table.grantReadData(getRecommendations.fn);
+    props.storage.table.grantReadWriteData(sendNotification.fn);
+    props.storage.table.grantReadWriteData(generateHeatmap.fn);
 
     props.storage.rawBucket.grantPut(uploadUrl.fn);
     props.storage.rawBucket.grantDelete(deleteVideo.fn);
@@ -129,6 +142,11 @@ export class ApiStack extends BaseStack {
     // Admin Routes
     this.addRoute("POST", "/videos/{id}/report-violation", createViolationReport.fn, jwtAuthorizer);
     this.addRoute("GET", "/admin/audit-logs", getAuditLogs.fn, jwtAuthorizer);
+
+    // Advanced Feature Routes
+    this.addRoute("GET", "/videos/{id}/recommendations", getRecommendations.fn, jwtAuthorizer);
+    this.addRoute("POST", "/notifications/send", sendNotification.fn, jwtAuthorizer);
+    this.addRoute("GET", "/videos/{id}/heatmap", generateHeatmap.fn, jwtAuthorizer);
 
     this.webSocketApi = new apigwv2.WebSocketApi(this, "WebSocketApi", {
       connectRouteOptions: {
