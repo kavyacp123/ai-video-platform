@@ -34,6 +34,23 @@ export class ApiStack extends BaseStack {
       ...env,
       USER_POOL_ID: props.auth.userPool.userPoolId
     });
+
+    // Social Features
+    const createComment = this.createApiLambda("CreateCommentFunction", "create-comment", env);
+    const getComments = this.createApiLambda("GetCommentsFunction", "get-comments", env);
+    const likeVideo = this.createApiLambda("LikeVideoFunction", "like-video", env);
+    const rateVideo = this.createApiLambda("RateVideoFunction", "rate-video", env);
+    const followUser = this.createApiLambda("FollowUserFunction", "follow-user", env);
+
+    // Analytics
+    const trackWatchSession = this.createApiLambda("TrackWatchSessionFunction", "track-watch-session", env);
+    const trackEngagement = this.createApiLambda("TrackEngagementFunction", "track-engagement", env);
+    const getVideoAnalytics = this.createApiLambda("GetVideoAnalyticsFunction", "get-video-analytics", env);
+
+    // Admin & Compliance
+    const createViolationReport = this.createApiLambda("CreateViolationReportFunction", "create-violation-report", env);
+    const getAuditLogs = this.createApiLambda("GetAuditLogsFunction", "get-audit-logs", env);
+
     this.criticalFunctions = [uploadUrl.fn, getStream.fn, jwtAuthorizerFn.fn];
 
     props.storage.table.grantReadWriteData(uploadUrl.fn);
@@ -44,6 +61,23 @@ export class ApiStack extends BaseStack {
     props.storage.table.grantReadWriteData(deleteVideo.fn);
     props.storage.table.grantReadWriteData(wsConnect.fn);
     props.storage.table.grantReadWriteData(wsDisconnect.fn);
+
+    // Grant permissions for social features
+    props.storage.table.grantReadWriteData(createComment.fn);
+    props.storage.table.grantReadData(getComments.fn);
+    props.storage.table.grantReadWriteData(likeVideo.fn);
+    props.storage.table.grantReadWriteData(rateVideo.fn);
+    props.storage.table.grantReadWriteData(followUser.fn);
+
+    // Grant permissions for analytics
+    props.storage.table.grantReadWriteData(trackWatchSession.fn);
+    props.storage.table.grantReadWriteData(trackEngagement.fn);
+    props.storage.table.grantReadData(getVideoAnalytics.fn);
+
+    // Grant permissions for admin
+    props.storage.table.grantReadWriteData(createViolationReport.fn);
+    props.storage.table.grantReadData(getAuditLogs.fn);
+
     props.storage.rawBucket.grantPut(uploadUrl.fn);
     props.storage.rawBucket.grantDelete(deleteVideo.fn);
     props.eventBus.grantPutEventsTo(uploadUrl.fn);
@@ -77,6 +111,24 @@ export class ApiStack extends BaseStack {
     this.addRoute("GET", "/status/{id}", getStatus.fn, jwtAuthorizer);
     this.addRoute("GET", "/videos", listVideos.fn, jwtAuthorizer);
     this.addRoute("DELETE", "/video/{id}", deleteVideo.fn, jwtAuthorizer);
+
+    // Social Routes
+    this.addRoute("POST", "/videos/{id}/comments", createComment.fn, jwtAuthorizer);
+    this.addRoute("GET", "/videos/{id}/comments", getComments.fn, jwtAuthorizer);
+    this.addRoute("POST", "/videos/{id}/like", likeVideo.fn, jwtAuthorizer);
+    this.addRoute("DELETE", "/videos/{id}/like", likeVideo.fn, jwtAuthorizer);
+    this.addRoute("POST", "/videos/{id}/rate", rateVideo.fn, jwtAuthorizer);
+    this.addRoute("POST", "/users/{targetUserId}/follow", followUser.fn, jwtAuthorizer);
+    this.addRoute("DELETE", "/users/{targetUserId}/follow", followUser.fn, jwtAuthorizer);
+
+    // Analytics Routes
+    this.addRoute("POST", "/videos/{id}/watch-session", trackWatchSession.fn, jwtAuthorizer);
+    this.addRoute("POST", "/videos/{id}/engagement", trackEngagement.fn, jwtAuthorizer);
+    this.addRoute("GET", "/videos/{id}/analytics", getVideoAnalytics.fn, jwtAuthorizer);
+
+    // Admin Routes
+    this.addRoute("POST", "/videos/{id}/report-violation", createViolationReport.fn, jwtAuthorizer);
+    this.addRoute("GET", "/admin/audit-logs", getAuditLogs.fn, jwtAuthorizer);
 
     this.webSocketApi = new apigwv2.WebSocketApi(this, "WebSocketApi", {
       connectRouteOptions: {
