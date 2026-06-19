@@ -198,7 +198,7 @@ For ${contentType} content, how good is this as a thumbnail? Rate 1-10.`;
 
     const response = await bedrock.send(
       new InvokeModelCommand({
-        modelId: process.env.BEDROCK_MODEL_ID || "amazon.nova-lite-v1:0",
+        modelId: process.env.BEDROCK_MODEL_ID || "apac.amazon.nova-lite-v1:0",
         contentType: "application/json",
         accept: "application/json",
         body: JSON.stringify({

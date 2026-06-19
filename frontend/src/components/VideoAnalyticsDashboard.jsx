@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { BarChart3, Eye, Heart, Star, Activity } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -8,9 +9,14 @@ export function VideoAnalyticsDashboard({ videoId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   useEffect(() => {
@@ -36,66 +42,78 @@ export function VideoAnalyticsDashboard({ videoId }) {
     }
   }
 
-  if (loading) return <div>Loading analytics...</div>;
-  if (error) return <div style={{ color: "red" }}>{error}</div>;
+  if (loading) return (
+    <div className="glass-panel" style={{ padding: "2rem", display: "flex", justifyContent: "center" }}>
+      <div className="spinner"></div>
+    </div>
+  );
+  if (error) return <div style={{ color: "var(--danger)", padding: "1rem" }}>{error}</div>;
   if (!analytics) return null;
 
   return (
-    <div style={{ padding: "1rem", backgroundColor: "#f5f5f5", borderRadius: "8px", marginTop: "2rem" }}>
-      <h3>Video Analytics</h3>
+    <div className="glass-panel" style={{ padding: "1.5rem" }}>
+      <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem", color: "var(--text-primary)" }}>
+        <BarChart3 size={20} color="var(--accent-secondary)" />
+        Video Analytics
+      </h3>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1rem",
-          marginTop: "1rem"
-        }}
-      >
-        <div style={{ padding: "1rem", backgroundColor: "white", borderRadius: "4px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <div style={{ fontSize: "0.875rem", color: "#666" }}>Total Views</div>
-          <div style={{ fontSize: "2rem", fontWeight: "bold", marginTop: "0.5rem" }}>{analytics.totalWatches || 0}</div>
-        </div>
-
-        <div style={{ padding: "1rem", backgroundColor: "white", borderRadius: "4px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <div style={{ fontSize: "0.875rem", color: "#666" }}>Total Likes</div>
-          <div style={{ fontSize: "2rem", fontWeight: "bold", marginTop: "0.5rem" }}>{analytics.totalLikes || 0}</div>
-        </div>
-
-        <div style={{ padding: "1rem", backgroundColor: "white", borderRadius: "4px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <div style={{ fontSize: "0.875rem", color: "#666" }}>Average Rating</div>
-          <div style={{ fontSize: "2rem", fontWeight: "bold", marginTop: "0.5rem" }}>
-            {analytics.averageRating} ★
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1rem" }}>
+        <div style={{ padding: "1rem", backgroundColor: "var(--bg-tertiary)", borderRadius: "12px", border: "1px solid var(--border-light)" }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <Eye size={14} /> Total Views
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: "700", marginTop: "0.5rem", color: "var(--text-primary)" }}>
+            {analytics.totalWatches || 0}
           </div>
         </div>
 
-        <div style={{ padding: "1rem", backgroundColor: "white", borderRadius: "4px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-          <div style={{ fontSize: "0.875rem", color: "#666" }}>Engagement Events</div>
-          <div style={{ fontSize: "2rem", fontWeight: "bold", marginTop: "0.5rem" }}>
+        <div style={{ padding: "1rem", backgroundColor: "var(--bg-tertiary)", borderRadius: "12px", border: "1px solid var(--border-light)" }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <Heart size={14} /> Total Likes
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: "700", marginTop: "0.5rem", color: "var(--text-primary)" }}>
+            {analytics.totalLikes || 0}
+          </div>
+        </div>
+
+        <div style={{ padding: "1rem", backgroundColor: "var(--bg-tertiary)", borderRadius: "12px", border: "1px solid var(--border-light)" }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <Star size={14} /> Avg Rating
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: "700", marginTop: "0.5rem", color: "var(--warning)" }}>
+            {analytics.averageRating}
+          </div>
+        </div>
+
+        <div style={{ padding: "1rem", backgroundColor: "var(--bg-tertiary)", borderRadius: "12px", border: "1px solid var(--border-light)" }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <Activity size={14} /> Engagements
+          </div>
+          <div style={{ fontSize: "1.75rem", fontWeight: "700", marginTop: "0.5rem", color: "var(--accent-primary)" }}>
             {analytics.totalEngagementEvents || 0}
           </div>
         </div>
       </div>
 
       {analytics.engagementBreakdown && (
-        <div style={{ marginTop: "1.5rem", padding: "1rem", backgroundColor: "white", borderRadius: "4px" }}>
-          <h4>Engagement Breakdown</h4>
-          <div style={{ display: "flex", gap: "2rem", marginTop: "1rem", flexWrap: "wrap" }}>
+        <div style={{ marginTop: "1.5rem", padding: "1.25rem", backgroundColor: "var(--bg-tertiary)", borderRadius: "12px", border: "1px solid var(--border-light)" }}>
+          <h4 style={{ fontSize: "0.95rem", color: "var(--text-secondary)", marginBottom: "1rem" }}>Engagement Breakdown</h4>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1rem" }}>
             <div>
-              <div style={{ fontSize: "0.875rem", color: "#666" }}>Plays</div>
-              <div style={{ fontSize: "1.5rem", fontWeight: "bold" }}>{analytics.engagementBreakdown.plays}</div>
+              <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)" }}>Plays</div>
+              <div style={{ fontSize: "1.25rem", fontWeight: "600" }}>{analytics.engagementBreakdown.plays}</div>
             </div>
             <div>
-              <div style={{ fontSize: "0.875rem", color: "#666" }}>Pauses</div>
-              <div style={{ fontSize: "1.5rem", fontWeight: "bold" }}>{analytics.engagementBreakdown.pauses}</div>
+              <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)" }}>Pauses</div>
+              <div style={{ fontSize: "1.25rem", fontWeight: "600" }}>{analytics.engagementBreakdown.pauses}</div>
             </div>
             <div>
-              <div style={{ fontSize: "0.875rem", color: "#666" }}>Skips</div>
-              <div style={{ fontSize: "1.5rem", fontWeight: "bold" }}>{analytics.engagementBreakdown.skips}</div>
+              <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)" }}>Skips</div>
+              <div style={{ fontSize: "1.25rem", fontWeight: "600" }}>{analytics.engagementBreakdown.skips}</div>
             </div>
             <div>
-              <div style={{ fontSize: "0.875rem", color: "#666" }}>Replays</div>
-              <div style={{ fontSize: "1.5rem", fontWeight: "bold" }}>{analytics.engagementBreakdown.replays}</div>
+              <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)" }}>Replays</div>
+              <div style={{ fontSize: "1.25rem", fontWeight: "600" }}>{analytics.engagementBreakdown.replays}</div>
             </div>
           </div>
         </div>

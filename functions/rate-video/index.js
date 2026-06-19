@@ -1,5 +1,5 @@
 const { rateVideo, createAuditLog } = require("../../shared/dynamoService.js");
-const { logger } = require("../../shared/logger.js");
+const logger = require("../../shared/logger.js");
 
 exports.handler = async (event) => {
   try {

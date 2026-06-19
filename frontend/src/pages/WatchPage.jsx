@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, PlayCircle } from "lucide-react";
 import { api } from "../services/api.js";
 import { VideoWatch } from "../components/VideoWatch.jsx";
 
@@ -42,50 +42,49 @@ export function WatchPage({ videoId, onPageChange }) {
     }
   };
 
-  if (loading) return <div style={{ textAlign: "center", padding: "2rem" }}>Loading video...</div>;
-  if (!video) return <div style={{ textAlign: "center", padding: "2rem", color: "red" }}>Video not found</div>;
+  if (loading) return (
+    <div className="app-container loader-container">
+      <div className="spinner"></div>
+      <p>Loading stream...</p>
+    </div>
+  );
+
+  if (!video) return (
+    <div className="app-container empty-state">
+      <h3>Video not found</h3>
+      <button className="btn btn-primary" onClick={() => onPageChange("dashboard")}>Go Home</button>
+    </div>
+  );
 
   return (
-    <main style={{ backgroundColor: "#000", minHeight: "100vh" }}>
-      <div style={{ maxWidth: "1400px", margin: "0 auto" }}>
-        <div style={{ padding: "1rem" }}>
-          <button
-            onClick={() => onPageChange("dashboard")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              padding: "0.5rem 1rem",
-              backgroundColor: "rgba(255,255,255,0.1)",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer"
-            }}
-          >
-            <ChevronLeft size={20} />
-            Back
+    <div className="app-container fade-in" style={{ backgroundColor: "#000" }}>
+      <nav className="navbar" style={{ background: "transparent", borderBottom: "none" }}>
+        <div className="navbar-actions">
+          <button className="btn btn-secondary" onClick={() => onPageChange("dashboard")} style={{ background: "rgba(255,255,255,0.1)", border: "none" }}>
+            <ChevronLeft size={18} />
+            Back to Studio
           </button>
         </div>
+      </nav>
 
-        <div style={{ aspectRatio: "16/9", backgroundColor: "#1a1a1a" }}>
+      <main style={{ maxWidth: "1600px", margin: "0 auto", width: "100%" }}>
+        {/* Cinematic Player */}
+        <div style={{ aspectRatio: "16/9", backgroundColor: "#000", position: "relative", boxShadow: "0 20px 40px rgba(0,0,0,0.8)" }}>
           <video
             ref={videoRef}
             controls
-            style={{ width: "100%", height: "100%" }}
-            onPlay={(e) => {
-              const tracker = {
-                trackPlay: (pos) => console.log("Playing at:", pos),
-                trackPause: (pos) => console.log("Paused at:", pos)
-              };
-            }}
+            autoPlay
+            style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
         </div>
 
-        <div style={{ backgroundColor: "#111", color: "white" }}>
-          <VideoWatch videoId={videoId} videoTitle={video.title} creatorUserId={video.userId} videoDuration={video.duration || 0} />
+        {/* Video Metadata Panel */}
+        <div className="page-container" style={{ padding: "3rem 5%" }}>
+          <div className="glass-panel" style={{ padding: "2rem", border: "none", background: "var(--bg-secondary)" }}>
+             <VideoWatch videoId={videoId} videoTitle={video.title} creatorUserId={video.userId} videoDuration={video.duration || 0} />
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

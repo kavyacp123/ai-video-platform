@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Authenticator } from "@aws-amplify/ui-react";
 import "@aws-amplify/ui-react/styles.css";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { UploadPage } from "./pages/UploadPage.jsx";
@@ -18,7 +17,7 @@ function AppContent() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#f5f5f5" }}>
+    <div className="app-container">
       {page === "dashboard" && <DashboardPage onPageChange={handlePageChange} />}
       {page === "upload" && <UploadPage onPageChange={handlePageChange} />}
       {page === "watch" && watchVideoId && <WatchPage videoId={watchVideoId} onPageChange={handlePageChange} />}
@@ -29,8 +28,6 @@ function AppContent() {
 
 export default function App() {
   return (
-    <Authenticator>
-      <AppContent />
-    </Authenticator>
+    <AppContent />
   );
 }

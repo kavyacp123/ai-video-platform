@@ -191,16 +191,4 @@ function nextUtcMidnightMs() {
   tomorrow.setUTCHours(0, 0, 0, 0);
   return tomorrow.getTime();
 }
-        ":limit": limit,
-        ":now": now
-      }
-    })
-  );
 
-  return { used: currentCount + 1, limit, plan };
-}
-
-function nextUtcMidnightMs() {
-  const now = new Date();
-  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
-}

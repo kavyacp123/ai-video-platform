@@ -1,5 +1,6 @@
 import { Duration, CfnOutput, SecretValue } from "aws-cdk-lib";
 import * as cognito from "aws-cdk-lib/aws-cognito";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { BaseStack } from "../base-stack.js";
 
 export class AuthStack extends BaseStack {
@@ -49,7 +50,7 @@ export class AuthStack extends BaseStack {
 
     this.domain = this.userPool.addDomain("CognitoDomain", {
       cognitoDomain: {
-        domainPrefix: this.node.tryGetContext("cognitoDomainPrefix") || "video-platform-auth"
+        domainPrefix: this.node.tryGetContext("cognitoDomainPrefix") || "video-platform-auth-084824953968"
       }
     });
 
@@ -91,6 +92,52 @@ export class AuthStack extends BaseStack {
           providerName: this.userPool.userPoolProviderName
         }
       ]
+    });
+
+    const authenticatedRole = new iam.Role(this, "CognitoDefaultAuthenticatedRole", {
+      assumedBy: new iam.FederatedPrincipal(
+        "cognito-identity.amazonaws.com",
+        {
+          StringEquals: {
+            "cognito-identity.amazonaws.com:aud": this.identityPool.ref
+          },
+          "ForAnyValue:StringLike": {
+            "cognito-identity.amazonaws.com:amr": "authenticated"
+          }
+        },
+        "sts:AssumeRoleWithWebIdentity"
+      )
+    });
+
+    const unauthenticatedRole = new iam.Role(this, "CognitoDefaultUnauthenticatedRole", {
+      assumedBy: new iam.FederatedPrincipal(
+        "cognito-identity.amazonaws.com",
+        {
+          StringEquals: {
+            "cognito-identity.amazonaws.com:aud": this.identityPool.ref
+          },
+          "ForAnyValue:StringLike": {
+            "cognito-identity.amazonaws.com:amr": "unauthenticated"
+          }
+        },
+        "sts:AssumeRoleWithWebIdentity"
+      )
+    });
+
+    // Grant API Gateway execute permissions to the authenticated users
+    authenticatedRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["execute-api:Invoke"],
+        resources: ["arn:aws:execute-api:*:*:*"]
+      })
+    );
+
+    new cognito.CfnIdentityPoolRoleAttachment(this, "IdentityPoolRoleAttachment", {
+      identityPoolId: this.identityPool.ref,
+      roles: {
+        authenticated: authenticatedRole.roleArn,
+        unauthenticated: unauthenticatedRole.roleArn
+      }
     });
 
     new CfnOutput(this, "UserPoolId", { value: this.userPool.userPoolId });

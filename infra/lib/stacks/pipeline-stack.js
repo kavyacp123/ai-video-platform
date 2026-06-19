@@ -74,13 +74,10 @@ export class PipelineStack extends BaseStack {
       timeout: Duration.minutes(5),
       environment: env
     });
-    const extractFrames = this.createLambda("ExtractFramesFunction", "extract-frames", { environment: env });
     const runModeration = this.createLambda("RunModerationFunction", "run-moderation", {
       timeout: Duration.minutes(2),
       environment: env
     });
-    const generateThumbnail = this.createLambda("GenerateThumbnailFunction", "generate-thumbnail", { environment: env });
-    const generateClips = this.createLambda("GenerateClipsFunction", "generate-clips", { environment: env });
     const markDeleting = this.createLambda("MarkDeletingFunction", "mark-deleting", { environment: env });
     const deleteRawVideo = this.createLambda("DeleteRawVideoFunction", "delete-raw-video", { environment: env });
     const deleteS3Prefix = this.createLambda("DeleteS3PrefixFunction", "delete-s3-prefix", {
@@ -110,10 +107,7 @@ export class PipelineStack extends BaseStack {
       startTranscription,
       pollTranscription,
       translateSubtitles,
-      extractFrames,
       runModeration,
-      generateThumbnail,
-      generateClips,
       markDeleting,
       deleteRawVideo,
       deleteS3Prefix,
@@ -135,29 +129,15 @@ export class PipelineStack extends BaseStack {
     props.storage.subtitleBucket.grantReadWrite(startTranscription.fn);
     props.storage.subtitleBucket.grantReadWrite(translateSubtitles.fn);
     props.storage.subtitleBucket.grantReadWrite(deleteS3Prefix.fn);
-    props.storage.thumbnailsBucket.grantReadWrite(extractFrames.fn);
     props.storage.thumbnailsBucket.grantRead(runModeration.fn);
     props.storage.thumbnailsBucket.grantReadWrite(deleteS3Prefix.fn);
     mediaConvertRole.grantPassRole(startTranscode.fn);
     this.addRolePolicy(supervisor.role, ["bedrock:InvokeModel"], ["*"]);
     this.addRolePolicy(generateMetadata.role, ["bedrock:InvokeModel"], ["*"]);
-    // AI Thumbnail & Clips - Add Bedrock and Rekognition permissions
-    this.addRolePolicy(generateThumbnail.role, [
-      "bedrock:InvokeModel",
-      "rekognition:DetectLabels",
-      "rekognition:DetectFaces"
-    ], ["*"]);
-    this.addRolePolicy(generateClips.role, [
-      "bedrock:InvokeModel",
-      "rekognition:DetectLabels",
-      "transcribe:GetTranscriptionJob"
-    ], ["*"]);
     this.addRolePolicy(startTranscode.role, ["mediaconvert:CreateJob"], ["*"]);
     this.addRolePolicy(mediaConvertCallback.role, ["states:SendTaskSuccess", "states:SendTaskFailure"], ["*"]);
+    // Only start-ffmpeg-job sends to the queue; the worker itself is what consumes it.
     ffmpegQueue.grantSendMessages(startFfmpegJob.fn);
-    ffmpegQueue.grantSendMessages(extractFrames.fn);
-    ffmpegQueue.grantSendMessages(generateThumbnail.fn);
-    ffmpegQueue.grantSendMessages(generateClips.fn);
     this.addRolePolicy(pollTranscode.role, ["mediaconvert:GetJob"], ["*"]);
     this.addRolePolicy(startTranscription.role, ["transcribe:StartTranscriptionJob"], ["*"]);
     this.addRolePolicy(pollTranscription.role, ["transcribe:GetTranscriptionJob"], ["*"]);
@@ -188,8 +168,7 @@ export class PipelineStack extends BaseStack {
         "fileSize.$": "$.fileSize",
         "plan.$": "$.plan",
         taskToken: sfn.JsonPath.taskToken
-      }),
-      outputPath: "$.Payload"
+      })
     }).addRetry(retry);
 
     const startFfmpeg = new tasks.LambdaInvoke(this, "StartFFmpegJob", {
@@ -204,8 +183,7 @@ export class PipelineStack extends BaseStack {
         "fileSize.$": "$.fileSize",
         "plan.$": "$.plan",
         taskToken: sfn.JsonPath.taskToken
-      }),
-      outputPath: "$.Payload"
+      })
     }).addRetry(retry);
 
     const transcodeChoice = new sfn.Choice(this, "ChooseTranscodingEngine")
@@ -216,7 +194,7 @@ export class PipelineStack extends BaseStack {
         ),
         startFfmpeg
       )
-      .otherwise(startMediaConvertJob);
+      .otherwise(startFfmpeg);
 
     const subtitleBranch = new sfn.Choice(this, "ShouldGenerateSubtitles")
       .when(
@@ -242,81 +220,27 @@ export class PipelineStack extends BaseStack {
       )
       .otherwise(new sfn.Pass(this, "SkipSubtitles"));
 
+    // After the single-pass FFmpeg job completes, the worker has already produced
+    // HLS segments, thumbnail, extracted frames, and clip in one pass.
+    // Step Functions only needs to run the AI post-processing steps in parallel:
+    //   - AI Moderation (Rekognition on the frames already in S3)
+    //   - Subtitle/Transcription pipeline
     const moderationBranch = new sfn.Choice(this, "ShouldModerate")
       .when(
         sfn.Condition.not(sfn.Condition.stringEquals("$.plan.moderationLevel", "none")),
-        new tasks.LambdaInvoke(this, "ExtractFrames", {
-          lambdaFunction: extractFrames.fn,
-          integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-          heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
-          payload: sfn.TaskInput.fromObject({
-            "videoId.$": "$.videoId",
-            "userId.$": "$.userId",
-            "s3Key.$": "$.s3Key",
-            "rawBucket.$": "$.rawBucket",
-            "plan.$": "$.plan",
-            taskToken: sfn.JsonPath.taskToken
-          }),
+        new tasks.LambdaInvoke(this, "RunModeration", {
+          lambdaFunction: runModeration.fn,
           outputPath: "$.Payload"
-        })
-          .addRetry(retry)
-          .next(
-            new tasks.LambdaInvoke(this, "RunModeration", {
-              lambdaFunction: runModeration.fn,
-              outputPath: "$.Payload"
-            }).addRetry(retry)
-          )
+        }).addRetry(retry)
       )
       .otherwise(new sfn.Pass(this, "SkipModeration"));
-
-    const thumbnailBranch = new sfn.Choice(this, "ShouldGenerateThumbnail")
-      .when(
-        sfn.Condition.booleanEquals("$.plan.generateThumbnail", true),
-        new tasks.LambdaInvoke(this, "GenerateThumbnail", {
-          lambdaFunction: generateThumbnail.fn,
-          integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-          heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
-          payload: sfn.TaskInput.fromObject({
-            "videoId.$": "$.videoId",
-            "userId.$": "$.userId",
-            "s3Key.$": "$.s3Key",
-            "rawBucket.$": "$.rawBucket",
-            "plan.$": "$.plan",
-            taskToken: sfn.JsonPath.taskToken
-          }),
-          outputPath: "$.Payload"
-        }).addRetry(retry)
-      )
-      .otherwise(new sfn.Pass(this, "SkipThumbnail"));
-
-    const clipsBranch = new sfn.Choice(this, "ShouldGenerateClips")
-      .when(
-        sfn.Condition.booleanEquals("$.plan.generateHighlights", true),
-        new tasks.LambdaInvoke(this, "GenerateClips", {
-          lambdaFunction: generateClips.fn,
-          integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-          heartbeatTimeout: sfn.Timeout.duration(Duration.hours(1)),
-          payload: sfn.TaskInput.fromObject({
-            "videoId.$": "$.videoId",
-            "userId.$": "$.userId",
-            "s3Key.$": "$.s3Key",
-            "rawBucket.$": "$.rawBucket",
-            "plan.$": "$.plan",
-            taskToken: sfn.JsonPath.taskToken
-          }),
-          outputPath: "$.Payload"
-        }).addRetry(retry)
-      )
-      .otherwise(new sfn.Pass(this, "SkipClips"));
 
     const parallel = new sfn.Parallel(this, "ParallelPipelines", {
       resultPath: "$.pipelineResults"
     })
       .branch(transcodeChoice)
       .branch(subtitleBranch)
-      .branch(moderationBranch)
-      .branch(thumbnailBranch)
-      .branch(clipsBranch);
+      .branch(moderationBranch);
 
     const metadata = new tasks.LambdaInvoke(this, "GenerateMetadata", {
       lambdaFunction: generateMetadata.fn,
@@ -338,7 +262,7 @@ export class PipelineStack extends BaseStack {
 
     this.stateMachine = new sfn.StateMachine(this, "VideoProcessingPipeline", {
       stateMachineName: "video-processing-pipeline",
-      stateMachineType: sfn.StateMachineType.EXPRESS,
+      stateMachineType: sfn.StateMachineType.STANDARD,
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
       tracingEnabled: true
     });

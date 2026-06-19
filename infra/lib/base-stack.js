@@ -20,7 +20,7 @@ export class BaseStack extends Stack {
   commonEnvironment(extra = {}) {
     return {
       CORS_ORIGIN: this.node.tryGetContext("frontendOrigin") || "*",
-      BEDROCK_MODEL_ID: this.node.tryGetContext("bedrockModelId") || "amazon.nova-pro-v1:0",
+      BEDROCK_MODEL_ID: this.node.tryGetContext("bedrockModelId") || "apac.amazon.nova-pro-v1:0",
       ...extra
     };
   }

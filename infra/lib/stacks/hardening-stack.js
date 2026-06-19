@@ -80,13 +80,9 @@ export class HardeningStack extends BaseStack {
       ]
     });
 
-    if (props.httpApi) {
-      new wafv2.CfnWebACLAssociation(this, "WafAssociation", {
-        resourceArn: `arn:aws:apigateway:${this.region}::/apis/${props.httpApi.apiId}/stages/$default`,
-        webAclArn: this.webAcl.attrArn
-      });
-    }
-
+    // Note: Regional WAFv2 WebACL does not support association with API Gateway HTTP APIs (v2).
+    // It can only be associated with REST APIs (v1), Application Load Balancers, or CloudFront distributions (using scope CLOUDFRONT).
+    
     const alarmAction = new actions.SnsAction(this.alertTopic);
 
     // Lambda Error Rate Alarms

@@ -2,7 +2,7 @@ const { PublishCommand } = require("@aws-sdk/client-sns");
 const { SNSClient } = require("@aws-sdk/client-sns");
 const { PutCommand } = require("@aws-sdk/lib-dynamodb");
 const { client } = require("../../shared/dynamoService.js");
-const { logger } = require("../../shared/logger.js");
+const logger = require("../../shared/logger.js");
 
 const snsClient = new SNSClient({});
 const TABLE_NAME = process.env.TABLE_NAME;

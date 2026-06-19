@@ -3,8 +3,13 @@ import { fetchAuthSession } from "aws-amplify/auth";
 const API_URL = import.meta.env.VITE_API_URL;
 
 async function getAuthHeaders() {
-  const session = await fetchAuthSession();
-  return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+  try {
+    const session = await fetchAuthSession();
+    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+  } catch (error) {
+    console.warn("Auth bypass: Proceeding without Authorization header");
+    return {};
+  }
 }
 
 export const api = {

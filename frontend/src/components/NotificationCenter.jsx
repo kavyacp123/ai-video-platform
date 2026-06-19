@@ -8,9 +8,14 @@ export function NotificationCenter() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showPanel, setShowPanel] = useState(false);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   useEffect(() => {

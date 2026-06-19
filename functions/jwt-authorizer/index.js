@@ -6,6 +6,7 @@ let cachedAt = 0;
 const CACHE_MS = 10 * 60 * 1000;
 
 exports.handler = async (event) => {
+  console.log("Authorizer Event:", JSON.stringify(event));
   try {
     const token = extractToken(event);
     const payload = await verifyJwt(token);
@@ -13,7 +14,7 @@ exports.handler = async (event) => {
       principalId: payload.sub,
       policyDocument: {
         Version: "2012-10-17",
-        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.routeArn }]
+        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn || event.routeArn }]
       },
       context: { userId: payload.sub, email: payload.email || "" }
     };

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { Heart } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -7,9 +8,14 @@ export function LikeButton({ videoId }) {
   const [liked, setLiked] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   async function handleLike() {
@@ -35,21 +41,18 @@ export function LikeButton({ videoId }) {
 
   return (
     <button
+      className="btn"
       onClick={handleLike}
       disabled={loading}
       style={{
-        padding: "0.5rem 1rem",
-        backgroundColor: liked ? "#ff4444" : "#ddd",
-        color: liked ? "white" : "black",
-        border: "none",
-        borderRadius: "4px",
-        cursor: loading ? "not-allowed" : "pointer",
-        display: "flex",
-        alignItems: "center",
-        gap: "0.5rem"
+        backgroundColor: liked ? "rgba(239, 68, 68, 0.15)" : "var(--bg-tertiary)",
+        color: liked ? "var(--danger)" : "var(--text-secondary)",
+        border: `1px solid ${liked ? "rgba(239, 68, 68, 0.3)" : "var(--border-light)"}`,
+        transition: "all 0.2s ease"
       }}
     >
-      {liked ? "❤️" : "🤍"} {liked ? "Unlike" : "Like"}
+      <Heart size={18} fill={liked ? "currentColor" : "none"} />
+      {liked ? "Liked" : "Like"}
     </button>
   );
 }

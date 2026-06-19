@@ -20,9 +20,14 @@ export function ViolationReportDialog({ videoId, onClose }) {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState(null);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   async function handleSubmit(e) {

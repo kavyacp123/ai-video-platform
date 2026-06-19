@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { Star } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -9,9 +10,14 @@ export function VideoRatings({ videoId }) {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   async function handleRating(value) {
@@ -37,11 +43,12 @@ export function VideoRatings({ videoId }) {
   }
 
   return (
-    <div style={{ padding: "1rem", backgroundColor: "#f9f9f9", borderRadius: "8px" }}>
-      <div style={{ marginBottom: "1rem" }}>
-        <h4>Rate this video</h4>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          {[1, 2, 3, 4, 5].map((value) => (
+    <div style={{ display: "flex", alignItems: "center", gap: "1rem", background: "var(--bg-tertiary)", padding: "0.5rem 1rem", borderRadius: "8px", border: "1px solid var(--border-light)" }}>
+      <span style={{ fontSize: "0.9rem", color: "var(--text-secondary)", fontWeight: 600 }}>Rate:</span>
+      <div style={{ display: "flex", gap: "0.25rem", alignItems: "center" }}>
+        {[1, 2, 3, 4, 5].map((value) => {
+          const isActive = hoveredRating >= value || rating >= value;
+          return (
             <button
               key={value}
               onClick={() => handleRating(value)}
@@ -49,20 +56,22 @@ export function VideoRatings({ videoId }) {
               onMouseLeave={() => setHoveredRating(0)}
               disabled={loading}
               style={{
-                fontSize: "2rem",
                 border: "none",
                 backgroundColor: "transparent",
                 cursor: loading ? "not-allowed" : "pointer",
-                opacity: hoveredRating >= value || rating >= value ? 1 : 0.3,
-                transition: "opacity 0.2s"
+                padding: "0.25rem",
+                display: "flex",
+                color: isActive ? "var(--warning)" : "var(--text-tertiary)",
+                transition: "color 0.2s, transform 0.1s",
+                transform: hoveredRating === value ? "scale(1.2)" : "scale(1)"
               }}
             >
-              ★
+              <Star size={20} fill={isActive ? "currentColor" : "none"} />
             </button>
-          ))}
-        </div>
-        {submitted && <p style={{ color: "green", marginTop: "0.5rem" }}>Rating submitted!</p>}
+          );
+        })}
       </div>
+      {submitted && <span style={{ fontSize: "0.85rem", color: "var(--success)", animation: "fadeIn 0.3s ease" }}>Thanks!</span>}
     </div>
   );
 }

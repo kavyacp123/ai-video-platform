@@ -76,8 +76,8 @@ export class DeliveryStack extends BaseStack {
         }
       },
       errorResponses: [
-        { httpStatus: 403, responseHttpStatus: 404, ttl: Duration.minutes(1) },
-        { httpStatus: 404, responseHttpStatus: 404, ttl: Duration.minutes(1) }
+        { httpStatus: 403, ttl: Duration.minutes(1) },
+        { httpStatus: 404, ttl: Duration.minutes(1) }
       ]
     });
 
@@ -101,19 +101,7 @@ export class DeliveryStack extends BaseStack {
           }
         })
       );
-      bucket.addToResourcePolicy(
-        new iam.PolicyStatement({
-          effect: iam.Effect.DENY,
-          principals: [new iam.StarPrincipal()],
-          actions: ["s3:GetObject"],
-          resources: [bucket.arnForObjects("*")],
-          conditions: {
-            StringNotLike: {
-              "AWS:SourceArn": `arn:aws:cloudfront::${this.account}:distribution/*`
-            }
-          }
-        })
-      );
+
     }
 
     new CfnOutput(this, "CloudFrontDomain", { value: this.distribution.distributionDomainName });

@@ -22,7 +22,7 @@ exports.handler = async (input) => {
       QueueUrl: process.env.TRANSCODE_QUEUE_URL,
       Entries: jobs.map((job, index) => ({
         Id: `${job.videoId}-${job.resolution}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80),
-        MessageGroupId: job.videoId,
+        MessageGroupId: `${job.videoId}-${job.resolution}`,
         MessageDeduplicationId: `${job.videoId}-${job.resolution}-${Date.now()}`,
         MessageBody: JSON.stringify(job),
         DelaySeconds: index

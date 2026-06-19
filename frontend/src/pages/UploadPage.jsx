@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Upload, X } from "lucide-react";
+import { Upload, X, ChevronLeft, Film, CloudLightning } from "lucide-react";
 import { api } from "../services/api.js";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
@@ -10,10 +10,34 @@ export function UploadPage({ onPageChange }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
-  const [videoId, setVideoId] = useState(null);
+  const [isDragActive, setIsDragActive] = useState(false);
 
   const handleFileSelect = (e) => {
     const selectedFile = e.target.files?.[0];
+    if (selectedFile && selectedFile.type.startsWith("video/")) {
+      setFile(selectedFile);
+      setMessage("");
+    } else {
+      setMessage("Please select a valid video file (MP4, WebM, MOV)");
+    }
+  };
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setIsDragActive(true);
+    } else if (e.type === "dragleave") {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+    
+    const selectedFile = e.dataTransfer.files?.[0];
     if (selectedFile && selectedFile.type.startsWith("video/")) {
       setFile(selectedFile);
       setMessage("");
@@ -27,20 +51,19 @@ export function UploadPage({ onPageChange }) {
 
     setUploading(true);
     setProgress(0);
-    setMessage("Creating secure upload URL...");
+    setMessage("Initializing quantum upload tunnel...");
 
     try {
       const uploadConfig = await api.getUploadUrl(file.name, file.type || "video/mp4", file.size);
       if (uploadConfig.error) throw new Error(uploadConfig.error);
 
-      setVideoId(uploadConfig.videoId);
-      setMessage("Uploading to S3...");
+      setMessage("Uploading to NovaStream...");
 
       await api.uploadToS3(uploadConfig.uploadUrl, file, (percent) => {
         setProgress(percent);
       });
 
-      setMessage("✓ Upload complete! Processing started...");
+      setMessage("✓ Upload complete! AI Processing has begun.");
       setFile(null);
       setProgress(0);
 
@@ -55,154 +78,108 @@ export function UploadPage({ onPageChange }) {
   };
 
   return (
-    <main style={{ maxWidth: "800px", margin: "0 auto", padding: "2rem" }}>
-      <div style={{ marginBottom: "2rem" }}>
-        <button
-          onClick={() => onPageChange("dashboard")}
-          style={{
-            padding: "0.5rem 1rem",
-            backgroundColor: "#ddd",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer"
-          }}
-        >
-          ← Back to Dashboard
-        </button>
-      </div>
+    <div className="fade-in">
+      <nav className="navbar">
+        <div className="navbar-brand">
+          <Film size={28} />
+          <span>Upload Studio</span>
+        </div>
+        <div className="navbar-actions">
+          <button className="btn btn-secondary" onClick={() => onPageChange("dashboard")}>
+            <ChevronLeft size={18} />
+            Back to Dashboard
+          </button>
+        </div>
+      </nav>
 
-      <div
-        style={{
-          backgroundColor: "white",
-          borderRadius: "12px",
-          padding: "3rem",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-          textAlign: "center"
-        }}
-      >
-        <h1 style={{ marginTop: 0 }}>Upload Video</h1>
+      <main className="page-container" style={{ maxWidth: "800px", marginTop: "4rem" }}>
+        <div className="glass-panel" style={{ padding: "4rem 2rem", textAlign: "center" }}>
+          <CloudLightning size={48} style={{ color: "var(--accent-primary)", marginBottom: "1rem" }} />
+          <h1 style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>Deploy Video</h1>
+          <p style={{ marginBottom: "3rem" }}>Our AI will automatically transcribe, moderate, and extract highlights.</p>
 
-        {!file ? (
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              border: "2px dashed #0066cc",
-              borderRadius: "8px",
-              padding: "3rem",
-              backgroundColor: "#f0f7ff",
-              cursor: "pointer",
-              marginBottom: "1.5rem",
-              transition: "all 0.2s"
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#e8f1ff";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "#f0f7ff";
-            }}
-          >
-            <Upload size={48} style={{ color: "#0066cc", margin: "0 auto", marginBottom: "1rem" }} />
-            <p style={{ margin: 0, fontSize: "1.125rem", fontWeight: "bold", marginBottom: "0.5rem" }}>
-              Drop your video here or click to select
-            </p>
-            <p style={{ margin: 0, color: "#666", fontSize: "0.875rem" }}>
-              Supported formats: MP4, WebM, MOV (Max 5GB)
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/*"
-              onChange={handleFileSelect}
-              style={{ display: "none" }}
-            />
-          </div>
-        ) : (
-          <div style={{ marginBottom: "1.5rem" }}>
+          {!file ? (
             <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
               style={{
-                backgroundColor: "#f0f7ff",
-                border: "1px solid #0066cc",
-                borderRadius: "8px",
-                padding: "1rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between"
+                border: `2px dashed ${isDragActive ? "var(--accent-primary)" : "var(--border-light)"}`,
+                borderRadius: "16px",
+                padding: "4rem 2rem",
+                backgroundColor: isDragActive ? "rgba(99, 102, 241, 0.1)" : "var(--bg-secondary)",
+                cursor: "pointer",
+                transition: "all 0.3s ease",
+                transform: isDragActive ? "scale(1.02)" : "scale(1)"
               }}
             >
-              <div style={{ textAlign: "left" }}>
-                <p style={{ margin: 0, fontWeight: "bold" }}>{file.name}</p>
-                <p style={{ margin: "0.25rem 0 0 0", color: "#666", fontSize: "0.875rem" }}>
-                  {(file.size / (1024 * 1024)).toFixed(2)} MB
-                </p>
-              </div>
-              <button
-                onClick={() => setFile(null)}
-                disabled={uploading}
-                style={{ backgroundColor: "transparent", border: "none", cursor: "pointer" }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {uploading && (
-          <div style={{ marginBottom: "1.5rem" }}>
-            <div style={{ marginBottom: "0.5rem", textAlign: "left" }}>
-              <p style={{ margin: 0, fontSize: "0.875rem" }}>Upload Progress: {progress}%</p>
-            </div>
-            <div
-              style={{
-                backgroundColor: "#e0e0e0",
-                borderRadius: "8px",
-                overflow: "hidden",
-                height: "8px"
-              }}
-            >
-              <div
-                style={{
-                  backgroundColor: "#0066cc",
-                  height: "100%",
-                  width: `${progress}%`,
-                  transition: "width 0.2s"
-                }}
+              <Upload size={48} style={{ color: "var(--text-tertiary)", margin: "0 auto", marginBottom: "1rem" }} />
+              <h3 style={{ marginBottom: "0.5rem" }}>Drag & Drop your video</h3>
+              <p style={{ fontSize: "0.9rem" }}>Supported formats: MP4, WebM, MOV (Max 5GB)</p>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleFileSelect}
+                style={{ display: "none" }}
               />
             </div>
-          </div>
-        )}
+          ) : (
+            <div style={{ textAlign: "left", backgroundColor: "var(--bg-secondary)", padding: "1.5rem", borderRadius: "12px", border: "1px solid var(--border-light)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <div>
+                  <h4 style={{ margin: 0, color: "var(--text-primary)" }}>{file.name}</h4>
+                  <p style={{ fontSize: "0.85rem", marginTop: "0.25rem" }}>{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                </div>
+                <button
+                  onClick={() => setFile(null)}
+                  disabled={uploading}
+                  style={{ background: "transparent", border: "none", color: "var(--text-secondary)", cursor: "pointer" }}
+                >
+                  <X size={24} />
+                </button>
+              </div>
 
-        {message && (
-          <p
-            style={{
-              padding: "0.75rem",
-              borderRadius: "4px",
-              marginBottom: "1rem",
-              backgroundColor: message.startsWith("✓") ? "#e8f5e9" : "#ffebee",
-              color: message.startsWith("✓") ? "#2e7d32" : "#c62828"
-            }}
-          >
-            {message}
-          </p>
-        )}
+              {uploading && (
+                <div style={{ marginTop: "1.5rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem", fontSize: "0.85rem" }}>
+                    <span>Uploading...</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div style={{ width: "100%", height: "8px", backgroundColor: "var(--bg-tertiary)", borderRadius: "4px", overflow: "hidden" }}>
+                    <div style={{ width: `${progress}%`, height: "100%", background: "var(--accent-gradient)", transition: "width 0.2s ease" }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-        {file && !uploading && (
-          <button
-            onClick={handleUpload}
-            style={{
-              padding: "0.75rem 2rem",
-              backgroundColor: "#0066cc",
-              color: "white",
-              border: "none",
+          {message && (
+            <div style={{
+              marginTop: "2rem",
+              padding: "1rem",
               borderRadius: "8px",
-              cursor: "pointer",
-              fontWeight: "bold",
-              fontSize: "1rem"
-            }}
-          >
-            Start Upload
-          </button>
-        )}
-      </div>
-    </main>
+              backgroundColor: message.includes("Error") ? "rgba(239, 68, 68, 0.1)" : "rgba(34, 197, 94, 0.1)",
+              color: message.includes("Error") ? "var(--danger)" : "var(--success)",
+              border: `1px solid ${message.includes("Error") ? "rgba(239, 68, 68, 0.2)" : "rgba(34, 197, 94, 0.2)"}`
+            }}>
+              {message}
+            </div>
+          )}
+
+          {file && !uploading && (
+            <div style={{ marginTop: "2rem" }}>
+              <button className="btn btn-primary" onClick={handleUpload} style={{ width: "100%", padding: "1rem", fontSize: "1.1rem" }}>
+                <Upload size={20} />
+                Deploy Video to AI
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }

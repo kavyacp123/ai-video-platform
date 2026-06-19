@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { UserPlus, UserCheck } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -7,9 +8,14 @@ export function FollowButton({ userId }) {
   const [following, setFollowing] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   async function handleFollow() {
@@ -23,11 +29,11 @@ export function FollowButton({ userId }) {
         headers
       });
 
-      if (!response.ok) throw new Error("Failed to update follow");
+      if (!response.ok) throw new Error("Failed to update follow status");
 
       setFollowing(!following);
     } catch (error) {
-      console.error("Error updating follow:", error);
+      console.error("Error updating follow status:", error);
     } finally {
       setLoading(false);
     }
@@ -35,18 +41,13 @@ export function FollowButton({ userId }) {
 
   return (
     <button
+      className={`btn ${following ? "btn-secondary" : "btn-primary"}`}
       onClick={handleFollow}
       disabled={loading}
-      style={{
-        padding: "0.5rem 1rem",
-        backgroundColor: following ? "#0066cc" : "#ddd",
-        color: following ? "white" : "black",
-        border: "none",
-        borderRadius: "4px",
-        cursor: loading ? "not-allowed" : "pointer"
-      }}
+      style={{ marginLeft: "auto", borderRadius: "9999px", padding: "0.5rem 1.25rem", fontSize: "0.85rem" }}
     >
-      {loading ? "..." : following ? "Following" : "Follow"}
+      {following ? <UserCheck size={16} /> : <UserPlus size={16} />}
+      {following ? "Following" : "Follow"}
     </button>
   );
 }

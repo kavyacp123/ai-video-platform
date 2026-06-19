@@ -7,9 +7,14 @@ export function EngagementTracker({ videoId, videoDuration }) {
   const [tracking, setTracking] = useState(false);
   const [sessionId, setSessionId] = useState(null);
 
-  async function getAuthHeaders() {
-    const session = await fetchAuthSession();
-    return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    async function getAuthHeaders() {
+    try {
+      const session = await fetchAuthSession();
+      if (!session.tokens) return {};
+      return { Authorization: `Bearer ${session.tokens.accessToken.toString()}` };
+    } catch (e) {
+      return {};
+    }
   }
 
   useEffect(() => {

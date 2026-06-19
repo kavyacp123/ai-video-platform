@@ -13,8 +13,8 @@ exports.handler = async (event) => {
     if (video.status !== "READY") return json(409, { message: "Video is not ready", status: video.status });
 
     const playbackUrl = process.env.CF_KEY_PAIR_ID || process.env.CLOUDFRONT_KEY_PAIR_ID
-      ? await createSignedUrl(video.hlsS3Key || `hls/${videoId}/master.m3u8`)
-      : `https://${process.env.CLOUDFRONT_DOMAIN}/${video.hlsS3Key || `hls/${videoId}/master.m3u8`}`;
+      ? await createSignedUrl(video.hlsS3Key || `${videoId}/master.m3u8`)
+      : `https://${process.env.CLOUDFRONT_DOMAIN}/${video.hlsS3Key || `${videoId}/master.m3u8`}`;
 
     return json(200, {
       playbackUrl,

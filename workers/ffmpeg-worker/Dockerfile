@@ -5,6 +5,7 @@ RUN apk add --no-cache ffmpeg
 WORKDIR /app
 COPY package.json .
 RUN npm install --omit=dev
+COPY src/ src/
 COPY worker.js .
 
 CMD ["node", "worker.js"]

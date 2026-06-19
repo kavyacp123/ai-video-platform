@@ -1,5 +1,5 @@
 const { createViolationReport, createAuditLog } = require("../../shared/dynamoService.js");
-const { logger } = require("../../shared/logger.js");
+const logger = require("../../shared/logger.js");
 
 const ALLOWED_REASONS = [
   "copyright",

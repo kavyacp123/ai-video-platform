@@ -13,7 +13,8 @@ export class EventStack extends BaseStack {
     });
 
     this.agentDlq = new sqs.Queue(this, "AgentDlq", {
-      queueName: "agent-dlq",
+      queueName: "agent-dlq.fifo",
+      fifo: true,
       retentionPeriod: Duration.days(14)
     });
 
@@ -39,7 +40,7 @@ export class EventStack extends BaseStack {
         source: ["video-platform"],
         detailType: ["VIDEO_FAILED"]
       },
-      targets: [new targets.LambdaFunction(alert.fn), new targets.SqsQueue(this.agentDlq)]
+      targets: [new targets.LambdaFunction(alert.fn), new targets.SqsQueue(this.agentDlq, { messageGroupId: "VideoFailedGroup" })]
     });
 
     new CfnOutput(this, "EventBusName", { value: this.bus.eventBusName });

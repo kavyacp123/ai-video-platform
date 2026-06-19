@@ -1,234 +1,393 @@
-const { spawn } = require("child_process");
-const { createWriteStream } = require("fs");
-const { mkdir, readdir, rm } = require("fs/promises");
-const path = require("path");
-const { pipeline } = require("stream/promises");
-const { S3Client, GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } = require("@aws-sdk/client-sqs");
-const { SFNClient, SendTaskSuccessCommand, SendTaskFailureCommand } = require("@aws-sdk/client-sfn");
+"use strict";
 
-const s3 = new S3Client({});
-const sqs = new SQSClient({});
-const sfn = new SFNClient({});
-const queueUrl = process.env.TRANSCODE_QUEUE_URL;
+// ─── Core Node.js ────────────────────────────────────────────────────────────
+const { spawn }                          = require("child_process");
+const { createWriteStream }              = require("fs");
+const { mkdir, rm, readdir, writeFile }  = require("fs/promises");
+const path                               = require("path");
+const { pipeline }                       = require("stream/promises");
+const { randomUUID }                     = require("crypto");
+
+// ─── AWS SDK ──────────────────────────────────────────────────────────────────
+const { S3Client, GetObjectCommand }                = require("@aws-sdk/client-s3");
+const { SQSClient, ReceiveMessageCommand,
+        DeleteMessageCommand,
+        ChangeMessageVisibilityCommand }            = require("@aws-sdk/client-sqs");
+const { SFNClient, SendTaskSuccessCommand,
+        SendTaskFailureCommand }                    = require("@aws-sdk/client-sfn");
+
+// ─── Internal modules ─────────────────────────────────────────────────────────
+const { Logger }               = require("./src/logger");
+const { emitMetric }           = require("./src/metrics");
+const { buildSinglePassCommand }= require("./src/ffmpeg-builder");
+const { uploadHls, uploadThumbnail,
+        uploadFrames, uploadClip }        = require("./src/uploader");
+const { buildManifest }        = require("./src/manifest");
+
+// ─── Clients ──────────────────────────────────────────────────────────────────
+const s3  = new S3Client({ region: process.env.AWS_REGION || "ap-south-1" });
+const sqs = new SQSClient({ region: process.env.AWS_REGION || "ap-south-1" });
+const sfn = new SFNClient({ region: process.env.AWS_REGION || "ap-south-1" });
+
+const QUEUE_URL          = process.env.TRANSCODE_QUEUE_URL;
+const PROCESSED_BUCKET   = process.env.PROCESSED_BUCKET_NAME;
+const THUMBNAIL_BUCKET   = process.env.THUMBNAIL_BUCKET_NAME || process.env.PROCESSED_BUCKET_NAME;
+const WORKER_VERSION     = "2.0.0";
+
+// ─── Graceful shutdown tracking ───────────────────────────────────────────────
 let shuttingDown = false;
+let activeJobs   = 0;
+const activeReceipts = new Set();
 
 process.on("SIGTERM", () => {
   shuttingDown = true;
 });
 
-async function main() {
-  console.log(JSON.stringify({ message: "ffmpeg worker started", queueUrl }));
-  while (!shuttingDown) {
-    const batch = await sqs.send(
-      new ReceiveMessageCommand({
-        QueueUrl: queueUrl,
-        MaxNumberOfMessages: 1,
-        WaitTimeSeconds: 20,
-        VisibilityTimeout: 7200
-      })
-    );
+// ─── Root logger ─────────────────────────────────────────────────────────────
+const rootLog = new Logger({ workerVersion: WORKER_VERSION });
 
-    for (const message of batch.Messages || []) {
-      await handleMessage(message);
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN POLL LOOP
+// ─────────────────────────────────────────────────────────────────────────────
+async function main() {
+  rootLog.info("ffmpeg worker started", { queueUrl: QUEUE_URL, workerVersion: WORKER_VERSION });
+
+  while (!shuttingDown) {
+    const resp = await sqs.send(new ReceiveMessageCommand({
+      QueueUrl:            QUEUE_URL,
+      MaxNumberOfMessages: 1,
+      WaitTimeSeconds:     20,
+      VisibilityTimeout:   7200,  // 2 h – covers the longest possible transcode
+    }));
+
+    for (const message of resp.Messages || []) {
+      activeJobs++;
+      activeReceipts.add(message.ReceiptHandle);
+      handleMessage(message)            // intentionally NOT awaited – process concurrently
+        .catch((err) => rootLog.error("unhandled handleMessage error", { error: err.message }))
+        .finally(() => {
+          activeReceipts.delete(message.ReceiptHandle);
+          activeJobs--;
+        });
     }
   }
+
+  // ── Graceful drain ────────────────────────────────────────────────────────
+  rootLog.info("SIGTERM received, draining active jobs", { activeJobs });
+  const deadline = Date.now() + 100_000; // 100 s (Fargate gives 120 s after SIGTERM)
+  while (activeJobs > 0 && Date.now() < deadline) {
+    await sleep(1000);
+  }
+  if (activeJobs > 0) {
+    rootLog.warn("deadline reached before drain, returning messages", { activeJobs });
+    for (const receipt of activeReceipts) {
+      await sqs.send(new ChangeMessageVisibilityCommand({
+        QueueUrl:          QUEUE_URL,
+        ReceiptHandle:     receipt,
+        VisibilityTimeout: 0,
+      })).catch(() => {});
+    }
+  }
+  rootLog.info("worker shut down gracefully");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PER-MESSAGE HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
 async function handleMessage(message) {
   const job = JSON.parse(message.Body);
+
+  // Validate no path traversal
+  if (!isSafeId(job.videoId)) {
+    rootLog.error("unsafe videoId rejected", { videoId: job.videoId });
+    await sqs.send(new DeleteMessageCommand({ QueueUrl: QUEUE_URL, ReceiptHandle: message.ReceiptHandle }));
+    return;
+  }
+
+  const processingId = randomUUID();
+  const log = new Logger({ processingId, videoId: job.videoId, stage: "INIT" });
+  const t0  = Date.now();
+
+  log.info("job received", {
+    jobType: job.jobType,
+    sourceBucket: job.sourceBucket,
+    s3Key: job.s3Key,
+  });
+
   try {
-    const output = await processJob(job);
-    await sfn.send(new SendTaskSuccessCommand({ taskToken: job.taskToken, output: JSON.stringify(output) }));
-    await sqs.send(new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle }));
-  } catch (error) {
-    console.error(JSON.stringify({ message: "job failed", videoId: job.videoId, error: error.message }));
+    const manifest = await processJob(job, processingId, log);
+
+    log.info("job succeeded", { durationMs: Date.now() - t0 });
+
+    // Notify Step Functions
+    await sfn.send(new SendTaskSuccessCommand({
+      taskToken: job.taskToken,
+      output:    JSON.stringify(manifest),
+    }));
+
+    // Delete the message only after a successful task callback
+    await sqs.send(new DeleteMessageCommand({
+      QueueUrl:      QUEUE_URL,
+      ReceiptHandle: message.ReceiptHandle,
+    }));
+
+    await emitMetric("VideoProcessedCount", 1,               "Count",        { VideoId: job.videoId });
+    await emitMetric("ProcessingDuration",  Date.now() - t0, "Milliseconds", { VideoId: job.videoId });
+
+  } catch (err) {
+    log.error("job failed – sending task failure", {
+      error:      err.message,
+      durationMs: Date.now() - t0,
+    });
+
     if (job.taskToken) {
-      await sfn
-        .send(
-          new SendTaskFailureCommand({
-            taskToken: job.taskToken,
-            error: "FFMPEG_WORKER_FAILED",
-            cause: error.message
-          })
-        )
-        .catch(() => undefined);
+      await sfn.send(new SendTaskFailureCommand({
+        taskToken: job.taskToken,
+        error:     "FFMPEG_WORKER_FAILED",
+        cause:     err.message.slice(0, 256), // SFN cause limit
+      })).catch(() => {});
     }
+
+    await emitMetric("ProcessingFailures", 1, "Count", { VideoId: job.videoId });
   } finally {
-    await rm(`/tmp/${job.videoId}`, { recursive: true, force: true }).catch(() => undefined);
-    await rm(`/tmp/${job.videoId}.mp4`, { force: true }).catch(() => undefined);
+    await cleanup(job.videoId, log);
   }
 }
 
-async function processJob(job) {
-  const inputPath = `/tmp/${job.videoId}.mp4`;
-  const outputRoot = `/tmp/${job.videoId}`;
-  await mkdir(outputRoot, { recursive: true });
-  await downloadToFile(job.sourceBucket, job.s3Key, inputPath);
+// ─────────────────────────────────────────────────────────────────────────────
+// CORE SINGLE-PASS PROCESSING
+// ─────────────────────────────────────────────────────────────────────────────
+async function processJob(job, processingId, log) {
+  const videoId    = job.videoId;
+  const outputRoot = `/tmp/${videoId}`;
+  const inputPath  = `/tmp/${videoId}.mp4`;
 
-  if (job.jobType === "THUMBNAIL") {
-    return processThumbnailJob(job, inputPath, outputRoot);
-  }
+  const resolutions       = job.resolutions || ["720p", "480p", "360p"];
+  const generateThumbnail = job.generateThumbnail !== false;
+  const generateFrames    = job.generateFrames    !== false;
+  const generateClip      = job.generateClip      !== false;
+  const clips             = job.clips             || [];
 
-  if (job.jobType === "FRAME_EXTRACTION") {
-    return processFrameExtractionJob(job, inputPath, outputRoot);
-  }
+  const errors = [];   // non-critical failures accumulate here
 
-  if (job.jobType === "CLIP_GENERATION") {
-    return processClipGenerationJob(job, inputPath, outputRoot);
-  }
+  // ── 1. Create directory tree ─────────────────────────────────────────────
+  await log.timed("CREATE_DIRS", async () => {
+    await mkdir(outputRoot, { recursive: true });
+    for (const r of resolutions) await mkdir(path.join(outputRoot, r), { recursive: true });
+    if (generateThumbnail) await mkdir(path.join(outputRoot, "thumbnails", videoId), { recursive: true });
+    if (generateFrames)    await mkdir(path.join(outputRoot, "frames"),                { recursive: true });
+    if (generateClip)      await mkdir(path.join(outputRoot, "clips", videoId),        { recursive: true });
+  });
 
-  const hlsKeys = {};
-  await Promise.all(
-    (job.resolutions || ["480p"]).map(async (resolution) => {
-      const config = resolutionConfig(resolution);
-      const dir = path.join(outputRoot, resolution);
-      await mkdir(dir, { recursive: true });
-      await runFfmpeg([
-        "-y",
-        "-i",
-        inputPath,
-        "-vf",
-        `scale=${config.width}:${config.height}`,
-        "-c:v",
-        "libx264",
-        "-crf",
-        "23",
-        "-preset",
-        "fast",
-        "-c:a",
-        "aac",
-        "-b:a",
-        config.audioBitrate,
-        "-hls_time",
-        "6",
-        "-hls_playlist_type",
-        "vod",
-        "-hls_segment_filename",
-        path.join(dir, "seg%03d.ts"),
-        path.join(dir, "index.m3u8")
-      ]);
-      hlsKeys[resolution] = `${job.videoId}/${resolution}/index.m3u8`;
-    })
+  // ── 2. Download the raw video exactly once ───────────────────────────────
+  await log.timed("S3_DOWNLOAD", async () => {
+    const resp = await s3.send(new GetObjectCommand({
+      Bucket: job.sourceBucket,
+      Key:    job.s3Key,
+    }));
+    await pipeline(resp.Body, createWriteStream(inputPath));
+  });
+
+  // ── 3. Get FFmpeg version for the manifest ───────────────────────────────
+  const ffmpegVersion = await getFfmpegVersion().catch(() => "unknown");
+
+  // ── 4. Build single FFmpeg command via -filter_complex ───────────────────
+  const { args } = buildSinglePassCommand({
+    inputPath,
+    outputRoot,
+    videoId,
+    resolutions,
+    generateThumbnail,
+    generateFrames,
+    generateClip,
+    clips,
+  });
+
+  // ── 5. Run FFmpeg EXACTLY ONCE ───────────────────────────────────────────
+  await log.timed("FFMPEG_SINGLE_PASS", () => runFfmpeg(args, log));
+
+  // ── 6. Write master HLS playlist ────────────────────────────────────────
+  await log.timed("MASTER_PLAYLIST", async () => {
+    const lines = ["#EXTM3U"];
+    const bwMap = { "720p": 2500000, "480p": 1000000, "360p": 600000 };
+    const resMap = { "720p": "1280x720", "480p": "854x480", "360p": "640x360" };
+    for (const r of resolutions) {
+      lines.push(
+        `#EXT-X-STREAM-INF:BANDWIDTH=${bwMap[r] || 1000000},RESOLUTION=${resMap[r] || "854x480"}`,
+        `${r}/index.m3u8`
+      );
+    }
+    await writeFile(path.join(outputRoot, "master.m3u8"), lines.join("\n"));
+  });
+
+  // ─── 7. Incremental uploads (artifact-by-artifact) ───────────────────────
+
+  // 7a. HLS – CRITICAL, throws on failure
+  const hlsKeys = await log.timed("UPLOAD_HLS", () =>
+    uploadHls(outputRoot, PROCESSED_BUCKET, videoId, resolutions, log)
   );
 
-  if (job.generateHighlights) {
-    const dir = path.join(outputRoot, "highlights");
-    await mkdir(dir, { recursive: true });
-    await runFfmpeg([
-      "-y",
-      "-i",
-      inputPath,
-      "-vf",
-      "select='gt(scene,0.4)',setpts=N/FRAME_RATE/TB",
-      "-vsync",
-      "vfr",
-      path.join(dir, "frame%03d.jpg")
-    ]);
+  // 7b. Master playlist – CRITICAL
+  await log.timed("UPLOAD_MASTER", () =>
+    uploadSingleFile(
+      PROCESSED_BUCKET,
+      `${videoId}/master.m3u8`,
+      path.join(outputRoot, "master.m3u8"),
+      log
+    )
+  );
+
+  const hlsManifest = {
+    master: `${videoId}/master.m3u8`,
+    ...hlsKeys,
+  };
+
+  // 7c. Thumbnail – NON-CRITICAL
+  let thumbnailKey = null;
+  if (generateThumbnail) {
+    try {
+      thumbnailKey = await log.timed("UPLOAD_THUMBNAIL", () =>
+        uploadThumbnail(outputRoot, THUMBNAIL_BUCKET, videoId, log)
+      );
+    } catch (err) {
+      log.warn("thumbnail upload failed (non-critical)", { error: err.message });
+      errors.push(`THUMBNAIL_UPLOAD: ${err.message}`);
+      await emitMetric("UploadFailures", 1, "Count", { ArtifactType: "thumbnail" });
+    }
   }
 
-  await uploadTree(outputRoot, job.outputBucket, job.videoId);
-  return { videoId: job.videoId, hlsKeys };
+  // 7d. Frames – NON-CRITICAL
+  let frameKeys = [];
+  if (generateFrames) {
+    try {
+      frameKeys = await log.timed("UPLOAD_FRAMES", () =>
+        uploadFrames(outputRoot, THUMBNAIL_BUCKET, videoId, log)
+      );
+    } catch (err) {
+      log.warn("frames upload failed (non-critical)", { error: err.message });
+      errors.push(`FRAMES_UPLOAD: ${err.message}`);
+      await emitMetric("UploadFailures", 1, "Count", { ArtifactType: "frames" });
+    }
+  }
+
+  // 7e. Clip – NON-CRITICAL
+  let clipKey = null;
+  if (generateClip) {
+    try {
+      clipKey = await log.timed("UPLOAD_CLIP", () =>
+        uploadClip(outputRoot, PROCESSED_BUCKET, videoId, log)
+      );
+    } catch (err) {
+      log.warn("clip upload failed (non-critical)", { error: err.message });
+      errors.push(`CLIP_UPLOAD: ${err.message}`);
+      await emitMetric("UploadFailures", 1, "Count", { ArtifactType: "clip" });
+    }
+  }
+
+  // ── 8. Build final manifest ──────────────────────────────────────────────
+  const manifest = buildManifest({
+    processingId,
+    videoId,
+    status:    errors.length > 0 ? "PARTIAL_SUCCESS" : "SUCCESS",
+    hls:       hlsManifest,
+    thumbnail: thumbnailKey,
+    frames:    frameKeys,
+    clips:     clipKey ? [{ title: "Auto highlight", s3Key: clipKey }] : [],
+    errors,
+    metadata: {
+      ffmpegVersion,
+      workerVersion: WORKER_VERSION,
+    },
+  });
+
+  log.info("manifest built", { status: manifest.status, errorCount: errors.length });
+  return manifest;
 }
 
-async function processThumbnailJob(job, inputPath, outputRoot) {
-  const dir = path.join(outputRoot, "thumbnails", job.videoId);
-  await mkdir(dir, { recursive: true });
-  const output = path.join(dir, "poster.jpg");
-  await runFfmpeg(["-y", "-ss", "1", "-i", inputPath, "-frames:v", "1", "-q:v", "2", output]);
-  await uploadTree(outputRoot, job.outputBucket, "");
-  return {
-    videoId: job.videoId,
-    thumbnailKey: `thumbnails/${job.videoId}/poster.jpg`,
-    thumbnailUrl: `thumbnails/${job.videoId}/poster.jpg`
-  };
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function processFrameExtractionJob(job, inputPath, outputRoot) {
-  const dir = path.join(outputRoot, job.videoId, "frames");
-  await mkdir(dir, { recursive: true });
-  await runFfmpeg(["-y", "-i", inputPath, "-vf", "fps=1/30", "-q:v", "3", path.join(dir, "frame-%03d.jpg")]);
-  await uploadTree(outputRoot, job.outputBucket, "");
-  const files = await readdir(dir);
-  return {
-    videoId: job.videoId,
-    userId: job.userId,
-    plan: { moderationLevel: job.moderationLevel || "standard" },
-    frameS3Keys: files.filter((file) => file.endsWith(".jpg")).map((file) => `${job.videoId}/frames/${file}`)
-  };
-}
-
-async function processClipGenerationJob(job, inputPath, outputRoot) {
-  const dir = path.join(outputRoot, "clips", job.videoId);
-  await mkdir(dir, { recursive: true });
-  const output = path.join(dir, "highlight-1.mp4");
-  await runFfmpeg(["-y", "-i", inputPath, "-ss", "0", "-t", "15", "-c:v", "libx264", "-c:a", "aac", output]);
-  await uploadTree(outputRoot, job.outputBucket, "");
-  return {
-    videoId: job.videoId,
-    clips: [{ title: "Auto highlight 1", startSeconds: 0, endSeconds: 15, s3Key: `clips/${job.videoId}/highlight-1.mp4` }]
-  };
-}
-
-async function downloadToFile(bucket, key, filePath) {
-  const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  await pipeline(result.Body, createWriteStream(filePath));
-}
-
-function runFfmpeg(args) {
+/**
+ * Spawn FFmpeg and stream its stderr to the logger.
+ * This is the ONE place in the entire codebase where FFmpeg is invoked.
+ */
+function runFfmpeg(args, log) {
   return new Promise((resolve, reject) => {
-    const child = spawn("ffmpeg", args, { stdio: "inherit" });
+    const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+
+    let stderrBuffer = "";
+    child.stderr.on("data", (chunk) => {
+      stderrBuffer += chunk.toString();
+      // Emit only progress lines to avoid mega-log entries
+      const lines = stderrBuffer.split("\n");
+      stderrBuffer = lines.pop();
+      for (const line of lines) {
+        if (line.includes("frame=") || line.includes("speed=")) {
+          log.info("ffmpeg progress", { stage: "FFMPEG_SINGLE_PASS", line: line.trim() });
+        }
+      }
+    });
+
     child.on("error", reject);
-    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`))));
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`FFmpeg exited with code ${code}. Tail: ${stderrBuffer.slice(-500)}`));
+      }
+    });
   });
 }
 
-async function uploadTree(root, bucket, prefix) {
-  const files = await walk(root);
-  await Promise.all(
-    files.map(async (file) => {
-      const relative = path.relative(root, file);
-      const key = prefix ? `${prefix}/${relative}` : relative;
-      const body = require("fs").createReadStream(file);
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: bucket,
-          Key: key,
-          Body: body,
-          ContentType: contentType(file)
-        })
-      );
-    })
-  );
+/** Upload a single small file using the SDK PutObject. */
+async function uploadSingleFile(bucket, key, filePath, log) {
+  const { S3Client: _S3Client, PutObjectCommand: _Put } = require("@aws-sdk/client-s3");
+  const fs2 = require("fs");
+  await s3.send(new (require("@aws-sdk/client-s3").PutObjectCommand)({
+    Bucket:      bucket,
+    Key:         key,
+    Body:        fs2.createReadStream(filePath),
+    ContentType: "application/vnd.apple.mpegurl",
+  }));
+  log.info("master playlist uploaded", { key });
 }
 
-async function walk(dir) {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files = await Promise.all(
-    entries.map((entry) => {
-      const full = path.join(dir, entry.name);
-      return entry.isDirectory() ? walk(full) : full;
-    })
-  );
-  return files.flat();
+/** Get the FFmpeg version string. */
+function getFfmpegVersion() {
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffmpeg", ["-version"], { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.on("exit", () => resolve(out.split("\n")[0] || "unknown"));
+    child.on("error", reject);
+  });
 }
 
-function resolutionConfig(resolution) {
-  return {
-    "720p": { width: 1280, height: 720, audioBitrate: "192k" },
-    "480p": { width: 854, height: 480, audioBitrate: "128k" },
-    "360p": { width: 640, height: 360, audioBitrate: "96k" }
-  }[resolution] || { width: 854, height: 480, audioBitrate: "128k" };
+/** Validate videoId has no path traversal characters. */
+function isSafeId(id) {
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
 }
 
-function contentType(file) {
-  if (file.endsWith(".m3u8")) return "application/vnd.apple.mpegurl";
-  if (file.endsWith(".ts")) return "video/mp2t";
-  if (file.endsWith(".jpg")) return "image/jpeg";
-  return "application/octet-stream";
+/** Clean up all temporary files for a video. */
+async function cleanup(videoId, log) {
+  try {
+    await rm(`/tmp/${videoId}`,     { recursive: true, force: true });
+    await rm(`/tmp/${videoId}.mp4`, { force: true });
+    log.info("cleanup complete", { stage: "CLEANUP" });
+  } catch (err) {
+    log.warn("cleanup failed (non-critical)", { stage: "CLEANUP", error: err.message });
+  }
 }
 
-main().catch((error) => {
-  console.error(error);
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTRY POINT
+// ─────────────────────────────────────────────────────────────────────────────
+main().catch((err) => {
+  rootLog.error("fatal main loop error", { error: err.message, stack: err.stack });
   process.exit(1);
 });

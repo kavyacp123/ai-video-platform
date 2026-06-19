@@ -2,6 +2,7 @@ const { json, getUserId, errorResponse } = require("../../shared/http");
 const { listUserVideos } = require("../../shared/dynamoService");
 
 exports.handler = async (event) => {
+  console.log("Request context:", JSON.stringify(event.requestContext, null, 2));
   try {
     const userId = getUserId(event);
     const limit = Number(event.queryStringParameters?.limit || 20);

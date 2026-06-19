@@ -7,6 +7,7 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { BaseStack } from "../base-stack.js";
 
 export class CustomTranscoderStack extends BaseStack {
@@ -21,13 +22,20 @@ export class CustomTranscoderStack extends BaseStack {
       retentionPeriod: Duration.days(4)
     });
 
+    // Import the pipeline's FFmpeg queue (the one Step Functions sends jobs to)
+    const pipelineQueue = sqs.Queue.fromQueueAttributes(this, "PipelineFfmpegQueue", {
+      queueName: "workers-ffmpeg-worker-queue.fifo",
+      queueArn: `arn:aws:sqs:${this.region}:${this.account}:workers-ffmpeg-worker-queue.fifo`
+    });
+
     const env = {
       TABLE_NAME: props.storage.table.tableName,
       RAW_BUCKET_NAME: props.storage.rawBucket.bucketName,
       PROCESSED_BUCKET_NAME: props.storage.processedBucket.bucketName,
+      THUMBNAIL_BUCKET_NAME: props.storage.thumbnailsBucket.bucketName,
       EVENT_BUS_NAME: props.eventBus.eventBusName,
       CLOUDFRONT_DOMAIN: props.cloudFrontDomain,
-      TRANSCODE_QUEUE_URL: this.queue.queueUrl
+      TRANSCODE_QUEUE_URL: pipelineQueue.queueUrl
     };
 
     this.orchestrator = this.createLambda("CustomTranscodeOrchestratorFunction", "custom-transcode-orchestrator", {
@@ -61,13 +69,23 @@ export class CustomTranscoderStack extends BaseStack {
 
     const task = new ecs.FargateTaskDefinition(this, "FfmpegWorkerTask", {
       cpu: 2048,
-      memoryLimitMiB: 4096
+      memoryLimitMiB: 4096,
+      runtimePlatform: {
+        cpuArchitecture: ecs.CpuArchitecture.ARM64,
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX
+      }
     });
 
-    this.queue.grantConsumeMessages(task.taskRole);
+    pipelineQueue.grantConsumeMessages(task.taskRole);
     props.storage.rawBucket.grantRead(task.taskRole);
     props.storage.processedBucket.grantReadWrite(task.taskRole);
+    props.storage.thumbnailsBucket.grantReadWrite(task.taskRole);
     props.eventBus.grantPutEventsTo(task.taskRole);
+    // Allow worker to send task token callbacks to Step Functions
+    task.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ["states:SendTaskSuccess", "states:SendTaskFailure"],
+      resources: ["*"]
+    }));
 
     const workerLogGroup = new logs.LogGroup(this, "FfmpegWorkerLogGroup", {
       retention: logs.RetentionDays.ONE_MONTH
@@ -82,7 +100,8 @@ export class CustomTranscoderStack extends BaseStack {
         streamPrefix: "ffmpeg-worker",
         logGroup: workerLogGroup
       }),
-      environment: env
+      environment: env,
+      stopTimeout: Duration.seconds(110)
     });
 
     this.service = new ecs.FargateService(this, "FfmpegWorkerService", {
@@ -96,7 +115,7 @@ export class CustomTranscoderStack extends BaseStack {
     });
 
     const scalableTarget = this.service.autoScaleTaskCount({
-      minCapacity: 0,
+      minCapacity: 1,
       maxCapacity: 20
     });
 
@@ -107,7 +126,7 @@ export class CustomTranscoderStack extends BaseStack {
       metric: new cloudwatch.Metric({
         namespace: "AWS/SQS",
         metricName: "ApproximateNumberOfMessagesVisible",
-        dimensionsMap: { QueueName: this.queue.queueName },
+        dimensionsMap: { QueueName: "workers-ffmpeg-worker-queue.fifo" },
         statistic: "Average",
         period: Duration.minutes(1)
       })
