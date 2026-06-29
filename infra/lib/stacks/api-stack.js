@@ -105,9 +105,18 @@ export class ApiStack extends BaseStack {
       identitySource: ["$request.header.Authorization"]
     });
 
+    const frontendOrigin = (
+      props.frontendOrigin ||
+      this.node.tryGetContext("frontendOrigin") ||
+      "http://localhost:5173"
+    );
+    const formattedFrontendOrigin = frontendOrigin.startsWith("http") 
+      ? frontendOrigin 
+      : `https://${frontendOrigin}`;
+
     this.httpApi = new apigwv2.HttpApi(this, "HttpApi", {
       corsPreflight: {
-        allowOrigins: [this.node.tryGetContext("frontendOrigin") || "http://localhost:5173"],
+        allowOrigins: [formattedFrontendOrigin, "http://localhost:5173"],
         allowHeaders: ["content-type", "authorization"],
         allowMethods: [
           apigwv2.CorsHttpMethod.GET,
@@ -204,8 +213,7 @@ export class ApiStack extends BaseStack {
     this.httpApi.addRoutes({
       path,
       methods: [apigwv2.HttpMethod[method]],
-      // SECURITY BYPASS: Detach authorizer temporarily
-      // authorizer,
+      authorizer,
       integration: new integrations.HttpLambdaIntegration(`${method}${path}Integration`, fn)
     });
   }

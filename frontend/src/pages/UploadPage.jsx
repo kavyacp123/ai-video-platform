@@ -57,7 +57,7 @@ export function UploadPage({ onPageChange }) {
       const uploadConfig = await api.getUploadUrl(file.name, file.type || "video/mp4", file.size);
       if (uploadConfig.error) throw new Error(uploadConfig.error);
 
-      setMessage("Uploading to NovaStream...");
+      setMessage("Uploading to StreamMind...");
 
       await api.uploadToS3(uploadConfig.uploadUrl, file, (percent) => {
         setProgress(percent);

@@ -15,38 +15,32 @@ export class AuthStack extends BaseStack {
     props.table.grantReadWriteData(postConfirmation.fn);
 
     this.userPool = new cognito.UserPool(this, "UserPool", {
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: false,
       signInAliases: { email: true },
-      autoVerify: { email: true },
       lambdaTriggers: {
         postConfirmation: postConfirmation.fn
       },
       standardAttributes: {
         email: { required: true, mutable: true }
-      },
-      passwordPolicy: {
-        minLength: 8,
-        requireDigits: true,
-        requireLowercase: true,
-        requireUppercase: true,
-        requireSymbols: false
       }
     });
 
-    if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-      this.googleProvider = new cognito.UserPoolIdentityProviderGoogle(this, "GoogleProvider", {
-        userPool: this.userPool,
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecretValue: SecretValue.unsafePlainText(process.env.GOOGLE_CLIENT_SECRET),
-        scopes: ["email", "profile", "openid"],
-        attributeMapping: {
-          email: cognito.ProviderAttribute.GOOGLE_EMAIL,
-          givenName: cognito.ProviderAttribute.GOOGLE_GIVEN_NAME,
-          familyName: cognito.ProviderAttribute.GOOGLE_FAMILY_NAME,
-          profilePicture: cognito.ProviderAttribute.GOOGLE_PICTURE
-        }
-      });
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      throw new Error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required for Google OAuth");
     }
+
+    this.googleProvider = new cognito.UserPoolIdentityProviderGoogle(this, "GoogleProvider", {
+      userPool: this.userPool,
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecretValue: SecretValue.unsafePlainText(process.env.GOOGLE_CLIENT_SECRET),
+      scopes: ["email", "profile", "openid"],
+      attributeMapping: {
+        email: cognito.ProviderAttribute.GOOGLE_EMAIL,
+        givenName: cognito.ProviderAttribute.GOOGLE_GIVEN_NAME,
+        familyName: cognito.ProviderAttribute.GOOGLE_FAMILY_NAME,
+        profilePicture: cognito.ProviderAttribute.GOOGLE_PICTURE
+      }
+    });
 
     this.domain = this.userPool.addDomain("CognitoDomain", {
       cognitoDomain: {
@@ -55,23 +49,24 @@ export class AuthStack extends BaseStack {
     });
 
     const frontendOrigin = (
+      props.frontendOrigin ||
       this.node.tryGetContext("frontendOrigin") ||
       process.env.FRONTEND_ORIGIN ||
       "http://localhost:5173"
     ).replace(/\/$/, "");
-    const callbackUrls = Array.from(new Set(["http://localhost:5173/auth/callback", `${frontendOrigin}/auth/callback`]));
-    const logoutUrls = Array.from(new Set(["http://localhost:5173", frontendOrigin]));
+    
+    // Add https:// to the domain if it's just a raw cloudfront.net domain
+    const formattedFrontendOrigin = frontendOrigin.startsWith("http") 
+      ? frontendOrigin 
+      : `https://${frontendOrigin}`;
+
+    const callbackUrls = Array.from(new Set(["http://localhost:5173/auth/callback", `${formattedFrontendOrigin}/auth/callback`]));
+    const logoutUrls = Array.from(new Set(["http://localhost:5173", formattedFrontendOrigin]));
 
     this.userPoolClient = new cognito.UserPoolClient(this, "FrontendUserPoolClient", {
       userPool: this.userPool,
       generateSecret: false,
-      supportedIdentityProviders: this.googleProvider
-        ? [cognito.UserPoolClientIdentityProvider.COGNITO, cognito.UserPoolClientIdentityProvider.GOOGLE]
-        : [cognito.UserPoolClientIdentityProvider.COGNITO],
-      authFlows: {
-        userSrp: true,
-        userPassword: true
-      },
+      supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.GOOGLE],
       oAuth: {
         flows: { authorizationCodeGrant: true },
         callbackUrls,
@@ -80,9 +75,7 @@ export class AuthStack extends BaseStack {
       accessTokenValidity: Duration.hours(1),
       idTokenValidity: Duration.hours(1)
     });
-    if (this.googleProvider) {
-      this.userPoolClient.node.addDependency(this.googleProvider);
-    }
+    this.userPoolClient.node.addDependency(this.googleProvider);
 
     this.identityPool = new cognito.CfnIdentityPool(this, "IdentityPool", {
       allowUnauthenticatedIdentities: false,

@@ -8,6 +8,7 @@ import { ApiStack } from "../lib/stacks/api-stack.js";
 import { PipelineStack } from "../lib/stacks/pipeline-stack.js";
 import { CustomTranscoderStack } from "../lib/stacks/custom-transcoder-stack.js";
 import { HardeningStack } from "../lib/stacks/hardening-stack.js";
+import { FrontendStack } from "../lib/stacks/frontend-stack.js";
 
 const app = new cdk.App();
 const env = {
@@ -16,9 +17,11 @@ const env = {
 };
 
 const storage = new StorageStack(app, "StorageStack", { env });
+const frontend = new FrontendStack(app, "FrontendStack", { env });
 const auth = new AuthStack(app, "AuthStack", {
   env,
-  table: storage.table
+  table: storage.table,
+  frontendOrigin: frontend.distribution.distributionDomainName
 });
 const events = new EventStack(app, "EventStack", {
   env,
@@ -45,7 +48,8 @@ const api = new ApiStack(app, "ApiStack", {
   auth,
   eventBus: events.bus,
   cloudFrontDomain: delivery.distribution.distributionDomainName,
-  deletionStateMachine: pipeline.deletionStateMachine
+  deletionStateMachine: pipeline.deletionStateMachine,
+  frontendOrigin: frontend.distribution.distributionDomainName
 });
 const customTranscoder = new CustomTranscoderStack(app, "CustomTranscoderStack", {
   env,
@@ -64,5 +68,5 @@ new HardeningStack(app, "HardeningStack", {
 
 new cdk.CfnOutput(api, "DeploymentOrder", {
   value:
-    "StorageStack -> AuthStack -> EventStack -> DeliveryStack -> ApiStack -> PipelineStack -> CustomTranscoderStack"
+    "StorageStack -> FrontendStack -> AuthStack -> EventStack -> DeliveryStack -> ApiStack -> PipelineStack -> CustomTranscoderStack"
 });

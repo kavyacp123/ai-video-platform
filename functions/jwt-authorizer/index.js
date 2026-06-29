@@ -10,11 +10,17 @@ exports.handler = async (event) => {
   try {
     const token = extractToken(event);
     const payload = await verifyJwt(token);
+    
+    // Create a wildcard ARN so the cached policy applies to all endpoints
+    const methodArn = event.methodArn || event.routeArn;
+    const apiArnPrefix = methodArn.split("/").slice(0, 2).join("/");
+    const wildcardResource = `${apiArnPrefix}/*`;
+
     return {
       principalId: payload.sub,
       policyDocument: {
         Version: "2012-10-17",
-        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn || event.routeArn }]
+        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: wildcardResource }]
       },
       context: { userId: payload.sub, email: payload.email || "" }
     };
@@ -37,7 +43,7 @@ async function verifyJwt(token) {
 
   if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) throw new Error("TokenExpired");
   if (payload.iss !== issuer) throw new Error("InvalidIssuer");
-  if (payload.token_use !== "access") throw new Error("InvalidTokenUse");
+  if (payload.token_use !== "access" && payload.token_use !== "id") throw new Error("InvalidTokenUse");
 
   const jwks = await getJwks();
   const key = jwks.keys.find((item) => item.kid === header.kid);

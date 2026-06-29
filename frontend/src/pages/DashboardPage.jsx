@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { signOut } from "aws-amplify/auth";
 import { Grid2X2, Upload, LogOut, PlayCircle, Loader2 } from "lucide-react";
 import { api } from "../services/api.js";
 
 const CLOUDFRONT_DOMAIN = import.meta.env.VITE_CLOUDFRONT_DOMAIN || "";
 
-export function DashboardPage({ onPageChange }) {
+export function DashboardPage({ onPageChange, onSignOut }) {
   const [library, setLibrary] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -24,13 +23,8 @@ export function DashboardPage({ onPageChange }) {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut();
-      window.location.href = "/";
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
+  const handleLogout = () => {
+    if (onSignOut) onSignOut();
   };
 
   const getMediaUrl = (key) => {
@@ -44,15 +38,15 @@ export function DashboardPage({ onPageChange }) {
       <nav className="navbar">
         <div className="navbar-brand">
           <PlayCircle size={28} />
-          <span>NovaStream</span>
+          <span>StreamMind</span>
         </div>
         <div className="navbar-actions">
           <button className="btn btn-primary" onClick={() => onPageChange("upload")}>
             <Upload size={18} />
             Upload Video
           </button>
-          <button className="btn btn-secondary" onClick={handleLogout}>
-            <LogOut size={18} />
+          <button className="btn-sign-out" onClick={handleLogout}>
+            <LogOut size={16} />
             Sign Out
           </button>
         </div>
